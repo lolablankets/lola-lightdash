@@ -603,3 +603,33 @@ export const filterInTheCurrentDayTimezoneMocks = [
         "((customers.created) >= ('2020-04-03 12:00:00') AND (customers.created) <= ('2020-04-04 11:59:59'))",
     ],
 ];
+
+export const filterInThePastCompletedDayTimezoneMocks: [string, string][] = [
+    [
+        'UTC',
+        "((customers.created) >= ('2020-04-03 00:00:00') AND (customers.created) < ('2020-04-04 00:00:00'))",
+    ],
+    [
+        'America/New_York',
+        "((customers.created) >= ('2020-04-03 04:00:00') AND (customers.created) < ('2020-04-04 04:00:00'))",
+    ],
+    [
+        'Asia/Bangkok',
+        "((customers.created) >= ('2020-04-02 17:00:00') AND (customers.created) < ('2020-04-03 17:00:00'))",
+    ],
+];
+
+export const filterInTheNextCompletedDayTimezoneMocks: [string, string][] = [
+    [
+        'UTC',
+        "((customers.created) >= ('2020-04-05 00:00:00') AND (customers.created) < ('2020-04-06 00:00:00'))",
+    ],
+    [
+        'America/New_York',
+        "((customers.created) >= ('2020-04-05 04:00:00') AND (customers.created) < ('2020-04-06 04:00:00'))",
+    ],
+    [
+        'Asia/Bangkok',
+        "((customers.created) >= ('2020-04-04 17:00:00') AND (customers.created) < ('2020-04-05 17:00:00'))",
+    ],
+];

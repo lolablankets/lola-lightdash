@@ -21,6 +21,8 @@ import {
     ExpectedInThePastCompleteWeekFilterSQLWithCustomStartOfWeek,
     ExpectedNumberFilterSQL,
     filterInTheCurrentDayTimezoneMocks,
+    filterInTheNextCompletedDayTimezoneMocks,
+    filterInThePastCompletedDayTimezoneMocks,
     InBetweenPastTwoYearsFilter,
     InBetweenPastTwoYearsFilterSQL,
     InBetweenPastTwoYearsTimestampFilterSQL,
@@ -636,6 +638,50 @@ describe('Filter SQL', () => {
             ),
         ).toStrictEqual(TrinoInBetweenPastTwoYearsTimestampFilterSQL);
     });
+
+    test.each(filterInThePastCompletedDayTimezoneMocks)(
+        'IN_THE_PAST 1 completed day should shift UTC boundaries for timezone %s',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('04 Apr 2020 06:12:30 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InThePastFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: true,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInTheNextCompletedDayTimezoneMocks)(
+        'IN_THE_NEXT 1 completed day should shift UTC boundaries for timezone %s',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('04 Apr 2020 06:12:30 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InTheNextFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: true,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
 
     test.each(filterInTheCurrentDayTimezoneMocks)(
         'should return in the current day filter sql for timezone %s',
