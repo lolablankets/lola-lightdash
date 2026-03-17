@@ -1,27 +1,28 @@
 # Lola Lightdash Changelog
 
-Changes made in our fork on top of upstream [lightdash/lightdash](https://github.com/lightdash/lightdash).
+Fork-specific changes on top of upstream [lightdash/lightdash](https://github.com/lightdash/lightdash).
 
-## How to maintain this file
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-Add an entry **when you commit a fork-specific change**. Skip upstream merges —
-just update the "Based on" line. Each entry needs: what changed, why, and which
-files were touched. Keep it brief; link to PRs or plans for detail.
+> **How to maintain:** Add an entry under `## Unreleased` when you commit a
+> fork-specific change. When syncing upstream, update the "Based on" line.
+> When deploying, rename `Unreleased` to a dated section and start a fresh one.
 
 ---
 
-## Unreleased
+## [Unreleased]
 
 _Based on upstream `0.2627.0`_
 
-### Bug Fixes
+### Fixed
 
-- **Timezone-aware completed date filter boundaries** — `IN_THE_PAST` and
-  `IN_THE_NEXT` completed filters now use `.tz(timezone)` before computing
-  period boundaries, fixing incorrect UTC-only behavior upstream still has.
+- Completed date filter boundaries (`IN_THE_PAST`, `IN_THE_NEXT`) now respect
+  the timezone parameter via `.tz(timezone)` before computing period start —
+  upstream still computes these in UTC.
   (`packages/common/src/compiler/filtersCompiler.ts`)
 
-### Chores
+### Removed
 
-- **Removed local env files from git** — `.env`, `.env.development`, and
-  `.pi/agent/` are now gitignored. (`ced403239`)
+- Local `.env` and `.env.development` files from git tracking. (`.gitignore`)
+
+[unreleased]: https://github.com/lolablankets/lola-lightdash/compare/0.2627.0...HEAD
