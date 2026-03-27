@@ -3,7 +3,6 @@ import {
     Account,
     addDashboardFiltersToMetricQuery,
     AlreadyExistsError,
-    AlreadyProcessingError,
     AndFilterGroup,
     AnyType,
     ApiChartAndResults,
@@ -98,6 +97,7 @@ import {
     ItemsMap,
     Job,
     JobStatusType,
+    JobStepStatusType,
     JobStepType,
     JobType,
     LightdashError,
@@ -117,6 +117,7 @@ import {
     PivotChartData,
     PivotConfiguration,
     PivotValuesColumn,
+    preAggregateUtils,
     Project,
     ProjectCatalog,
     ProjectDefaults,
@@ -203,14 +204,18 @@ import { type FileStorageClient } from '../../clients/FileStorage/FileStorageCli
 import type { INatsClient } from '../../clients/NatsClient';
 import { LightdashConfig } from '../../config/parseConfig';
 import { normalizeDatabricksHostLenient } from '../../controllers/authentication/strategies/databricksStrategy';
-import { type DbPreAggregateDefinitionIn } from '../../database/entities/preAggregates';
 import type { DbTagUpdate } from '../../database/entities/tags';
+import { type DbPreAggregateDefinitionIn } from '../../ee/database/entities/preAggregates';
+import { PreAggregateModel } from '../../ee/models/PreAggregateModel';
+import { preAggregatePostProcessor } from '../../ee/preAggregates/postProcessor';
+import { buildMaterializationMetricQuery } from '../../ee/services/PreAggregateMaterializationService/buildMaterializationMetricQuery';
 import { errorHandler } from '../../errors';
 import Logger from '../../logging/logger';
 import { measureTime } from '../../logging/measureTime';
 import { AnalyticsModel } from '../../models/AnalyticsModel';
 import type { CatalogModel } from '../../models/CatalogModel/CatalogModel';
 import { ContentModel } from '../../models/ContentModel/ContentModel';
+import { ContentVerificationModel } from '../../models/ContentVerificationModel';
 import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
 import { DownloadFileModel } from '../../models/DownloadFileModel';
 import { EmailModel } from '../../models/EmailModel';
@@ -219,7 +224,6 @@ import { GroupsModel } from '../../models/GroupsModel';
 import { JobModel } from '../../models/JobModel/JobModel';
 import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
 import { OrganizationWarehouseCredentialsModel } from '../../models/OrganizationWarehouseCredentialsModel';
-import { PreAggregateModel } from '../../models/PreAggregateModel';
 import { ProjectCompileLogModel } from '../../models/ProjectCompileLogModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { ProjectParametersModel } from '../../models/ProjectParametersModel';
@@ -253,7 +257,6 @@ import { applyLimitToSqlQuery } from '../../utils/QueryBuilder/utils';
 import { SubtotalsCalculator } from '../../utils/SubtotalsCalculator';
 import { AdminNotificationService } from '../AdminNotificationService/AdminNotificationService';
 import { BaseService } from '../BaseService';
-import { buildMaterializationMetricQuery } from '../PreAggregateMaterializationService/buildMaterializationMetricQuery';
 import { SpacePermissionService } from '../SpaceService/SpacePermissionService';
 import {
     doesExploreMatchRequiredAttributes,
@@ -297,6 +300,7 @@ export type ProjectServiceArguments = {
     adminNotificationService: AdminNotificationService;
     spacePermissionService: SpacePermissionService;
     natsClient?: INatsClient;
+    contentVerificationModel?: ContentVerificationModel;
 };
 
 export class ProjectService extends BaseService {
@@ -366,6 +370,8 @@ export class ProjectService extends BaseService {
 
     spacePermissionService: SpacePermissionService;
 
+    contentVerificationModel: ContentVerificationModel | undefined;
+
     constructor({
         lightdashConfig,
         analytics,
@@ -399,6 +405,7 @@ export class ProjectService extends BaseService {
         organizationWarehouseCredentialsModel,
         adminNotificationService,
         spacePermissionService,
+        contentVerificationModel,
     }: ProjectServiceArguments) {
         super();
         this.lightdashConfig = lightdashConfig;
@@ -435,6 +442,7 @@ export class ProjectService extends BaseService {
             organizationWarehouseCredentialsModel;
         this.adminNotificationService = adminNotificationService;
         this.spacePermissionService = spacePermissionService;
+        this.contentVerificationModel = contentVerificationModel;
     }
 
     static getMetricQueryExecutionProperties({
@@ -1483,6 +1491,11 @@ export class ProjectService extends BaseService {
                                 buildMaterializationMetricQuery({
                                     sourceExplore,
                                     preAggregateDef: preAggregateDefinition,
+                                    materializationConfig: {
+                                        maxRows:
+                                            this.lightdashConfig.preAggregates
+                                                .materializationMaxRows,
+                                    },
                                 });
                         } catch (error) {
                             materializationQueryError = getErrorMessage(error);
@@ -3015,6 +3028,7 @@ export class ProjectService extends BaseService {
                 pivotDimensions?: string[];
             };
             projectUuid: string;
+            usePreAggregateCache?: boolean;
         } & ({ exploreName: string } | { explore: Explore }),
     ) {
         const {
@@ -3049,10 +3063,36 @@ export class ProjectService extends BaseService {
             throw new CustomSqlQueryForbiddenError();
         }
 
-        const explore =
+        const sourceExplore =
             'explore' in args
                 ? args.explore
                 : await this.getExplore(account, projectUuid, args.exploreName);
+
+        // Pre-aggregate routing: compile against the pre-agg explore when cache is enabled and there's a match
+        let explore = sourceExplore;
+        if (args.usePreAggregateCache !== false) {
+            const matchResult = preAggregateUtils.findMatch(
+                metricQuery,
+                sourceExplore,
+            );
+            if (matchResult.hit) {
+                const preAggExploreName = getPreAggregateExploreName(
+                    sourceExplore.name,
+                    matchResult.preAggregateName,
+                );
+                try {
+                    explore = await this.getExplore(
+                        account,
+                        projectUuid,
+                        preAggExploreName,
+                    );
+                } catch {
+                    this.logger.warn(
+                        `Pre-aggregate explore "${preAggExploreName}" not found, falling back to source explore`,
+                    );
+                }
+            }
+        }
 
         // Get warehouse credentials to build the SQL builder (no full connection needed for compilation)
         const warehouseCredentials =
@@ -5028,7 +5068,12 @@ export class ProjectService extends BaseService {
         };
 
         const onLockFailed = async () => {
-            throw new AlreadyProcessingError('Project is already compiling');
+            await this.jobModel.updateJobStep(
+                job.jobUuid,
+                JobStepStatusType.ERROR,
+                JobStepType.COMPILING,
+                'Compilation is already in progress for this project',
+            );
         };
 
         const timings = {
@@ -6242,6 +6287,86 @@ export class ProjectService extends BaseService {
                     this.spaceModel.MOST_POPULAR_OR_RECENTLY_UPDATED_LIMIT,
                 ),
         };
+    }
+
+    async getVerifiedContentForHomepage(
+        user: SessionUser,
+        projectUuid: string,
+    ): Promise<(DashboardBasicDetails | SpaceQuery)[]> {
+        if (!this.contentVerificationModel) {
+            return [];
+        }
+
+        const { enabled: contentVerificationEnabled } =
+            await this.featureFlagModel.get({
+                user,
+                featureFlagId: FeatureFlags.ContentVerification,
+            });
+        if (!contentVerificationEnabled) {
+            return [];
+        }
+
+        const projectSummary = await this.projectModel.getSummary(projectUuid);
+        if (
+            user.ability.cannot(
+                'view',
+                subject('Project', {
+                    organizationUuid: projectSummary.organizationUuid,
+                    projectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        // Get verified content UUIDs
+        const verifiedItems =
+            await this.contentVerificationModel.getAllForProject(projectUuid);
+
+        if (verifiedItems.length === 0) return [];
+
+        const verifiedChartUuids = new Set(
+            verifiedItems
+                .filter((item) => item.contentType === ContentType.CHART)
+                .map((item) => item.contentUuid),
+        );
+        const verifiedDashboardUuids = new Set(
+            verifiedItems
+                .filter((item) => item.contentType === ContentType.DASHBOARD)
+                .map((item) => item.contentUuid),
+        );
+
+        // Get accessible spaces for user
+        const spaces = await this.spaceModel.find({ projectUuid });
+        const allowedSpaceUuids =
+            await this.spacePermissionService.getAccessibleSpaceUuids(
+                'view',
+                user,
+                spaces.map((s) => s.uuid),
+            );
+
+        // Fetch full chart and dashboard details (same shape as most-popular)
+        const [charts, sqlCharts, dashboards] = await Promise.all([
+            verifiedChartUuids.size > 0
+                ? this.spaceModel.getSpaceQueries(allowedSpaceUuids)
+                : Promise.resolve([]),
+            verifiedChartUuids.size > 0
+                ? this.spaceModel.getSpaceSqlCharts(allowedSpaceUuids)
+                : Promise.resolve([]),
+            verifiedDashboardUuids.size > 0
+                ? this.spaceModel.getSpaceDashboards(allowedSpaceUuids)
+                : Promise.resolve([]),
+        ]);
+
+        // Filter to only verified items
+        const verifiedCharts = [...charts, ...sqlCharts].filter((chart) =>
+            verifiedChartUuids.has(chart.uuid),
+        );
+        const verifiedDashboards = dashboards.filter((dashboard) =>
+            verifiedDashboardUuids.has(dashboard.uuid),
+        );
+
+        return [...verifiedCharts, ...verifiedDashboards];
     }
 
     async getSpaces(
@@ -7768,7 +7893,10 @@ export class ProjectService extends BaseService {
                 },
                 defaults: project.projectDefaults,
             },
-            disableTimestampConversion,
+            {
+                disableTimestampConversion,
+                postProcessors: [preAggregatePostProcessor],
+            },
         );
         Logger.info(`Explore count: ${convertedExplores.length}`);
         const previewName = `preview_${jobId}_${prId}`;

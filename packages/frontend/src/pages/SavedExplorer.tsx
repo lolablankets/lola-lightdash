@@ -15,7 +15,6 @@ import {
 import useDashboardStorage from '../hooks/dashboard/useDashboardStorage';
 import { useExplorerQueryEffects } from '../hooks/useExplorerQueryEffects';
 import { useSavedQuery } from '../hooks/useSavedQuery';
-import { useSlugRedirect } from '../hooks/useSlugRedirect';
 import useApp from '../providers/App/useApp';
 import { ExplorerSection } from '../providers/Explorer/types';
 
@@ -66,8 +65,6 @@ const SavedExplorer = () => {
         projectUuid,
     });
 
-    useSlugRedirect(savedQueryUuid, data?.uuid);
-
     useEffect(() => {
         // If the saved explore is part of a dashboard, set the dashboard chart info
         // so we can show the banner + the user can navigate back to the dashboard easily
@@ -88,8 +85,10 @@ const SavedExplorer = () => {
 
         const currentSavedChart = store.getState().explorer.savedChart;
         const isNewChart = currentSavedChart?.uuid !== data.uuid;
+        const isExploreChanged =
+            currentSavedChart?.tableName !== data.tableName;
 
-        if (isNewChart) {
+        if (isNewChart || isExploreChanged) {
             const initialState = buildInitialExplorerState({
                 savedChart: data,
                 isEditMode,

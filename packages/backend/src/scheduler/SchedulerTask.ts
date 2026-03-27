@@ -30,6 +30,7 @@ import {
     getItemMap,
     getPivotConfig,
     getRequestMethod,
+    getSchedulerResourceTypeAndId,
     getSchedulerUuid,
     GsheetsNotificationPayload,
     isChartValidationError,
@@ -131,10 +132,12 @@ import {
     getNotificationChannelErrorBlocks,
 } from '../clients/Slack/SlackMessageBlocks';
 import { LightdashConfig } from '../config/parseConfig';
+import type { PreAggregateModel } from '../ee/models/PreAggregateModel';
+import type { PreAggregateMaterializationService } from '../ee/services/PreAggregateMaterializationService/PreAggregateMaterializationService';
 import Logger from '../logging/logger';
-import type { PreAggregateModel } from '../models/PreAggregateModel';
 import { isFeatureFlagEnabled } from '../postHog';
 import { AsyncQueryService } from '../services/AsyncQueryService/AsyncQueryService';
+import { SCHEDULER_POLLING_OPTIONS } from '../services/AsyncQueryService/types';
 import type { CatalogService } from '../services/CatalogService/CatalogService';
 import {
     CsvService,
@@ -145,7 +148,6 @@ import { DeployService } from '../services/DeployService';
 import { ExcelService } from '../services/ExcelService/ExcelService';
 import type { FeatureFlagService } from '../services/FeatureFlag/FeatureFlagService';
 import { PersistentDownloadFileService } from '../services/PersistentDownloadFileService/PersistentDownloadFileService';
-import type { PreAggregateMaterializationService } from '../services/PreAggregateMaterializationService/PreAggregateMaterializationService';
 import { getDashboardParametersValuesMap } from '../services/ProjectService/parameters';
 import { ProjectService } from '../services/ProjectService/ProjectService';
 import { RenameService } from '../services/RenameService/RenameService';
@@ -349,7 +351,7 @@ export default class SchedulerTask {
         } = scheduler;
 
         let imageUrl;
-        let imageLocalPath;
+        let imageS3Key;
         let csvUrl;
         let csvUrls;
         let pdfFile;
@@ -434,7 +436,7 @@ export default class SchedulerTask {
                     }
                     pdfFile = unfurlImage.pdfFile;
                     imageUrl = unfurlImage.imageUrl;
-                    imageLocalPath = `/tmp/${imageId}.png`;
+                    imageS3Key = `${imageId}.png`;
 
                     if (this.fileStorageClient.isEnabled() && imageUrl) {
                         imageUrl =
@@ -549,6 +551,7 @@ export default class SchedulerTask {
                                     columnOrder: chart.tableConfig.columnOrder,
                                     expirationSecondsOverride,
                                 },
+                                SCHEDULER_POLLING_OPTIONS,
                             );
                         csvUrl = {
                             filename: ExcelService.generateFileId(chart.name),
@@ -688,6 +691,7 @@ export default class SchedulerTask {
                                                 chart.tableConfig.columnOrder,
                                             expirationSecondsOverride,
                                         },
+                                        SCHEDULER_POLLING_OPTIONS,
                                     );
                                 return {
                                     chartName: chart.name,
@@ -764,6 +768,7 @@ export default class SchedulerTask {
                                                 ),
                                             expirationSecondsOverride,
                                         },
+                                        SCHEDULER_POLLING_OPTIONS,
                                     );
                                 return {
                                     chartName: chart.name,
@@ -893,7 +898,7 @@ export default class SchedulerTask {
             details,
             organizationUuid,
             imageUrl,
-            imageLocalPath,
+            imageS3Key,
             csvUrl,
             csvUrls,
             pdfFile,
@@ -1157,10 +1162,7 @@ export default class SchedulerTask {
                     groupId: notification.jobGroup,
                     type: 'slack',
                     format,
-                    resourceType:
-                        pageType === LightdashPage.CHART
-                            ? 'chart'
-                            : 'dashboard',
+                    ...getSchedulerResourceTypeAndId(scheduler),
                     sendNow: schedulerUuid === undefined,
                     isThresholdAlert: scheduler.thresholds !== undefined,
                 },
@@ -1407,10 +1409,7 @@ export default class SchedulerTask {
                     groupId: notification.jobGroup,
                     type: 'msteams',
                     format,
-                    resourceType:
-                        pageType === LightdashPage.CHART
-                            ? 'chart'
-                            : 'dashboard',
+                    ...getSchedulerResourceTypeAndId(scheduler),
                     sendNow: schedulerUuid === undefined,
                     isThresholdAlert: scheduler.thresholds !== undefined,
                 },
@@ -2158,13 +2157,16 @@ export default class SchedulerTask {
                 rows,
                 fields: itemMap,
                 pivotDetails,
-            } = await this.asyncQueryService.executeMetricQueryAndGetResults({
-                account,
-                projectUuid: payload.projectUuid,
-                metricQuery,
-                context: QueryExecutionContext.GSHEETS,
-                pivotConfiguration,
-            });
+            } = await this.asyncQueryService.executeMetricQueryAndGetResults(
+                {
+                    account,
+                    projectUuid: payload.projectUuid,
+                    metricQuery,
+                    context: QueryExecutionContext.GSHEETS,
+                    pivotConfiguration,
+                },
+                SCHEDULER_POLLING_OPTIONS,
+            );
 
             const refreshToken = await this.userService.getRefreshToken(
                 payload.userUuid,
@@ -2329,12 +2331,35 @@ export default class SchedulerTask {
                 details,
                 pageType,
                 imageUrl,
-                imageLocalPath,
+                imageS3Key,
                 csvUrl,
                 csvUrls,
                 pdfFile,
                 failures,
             } = notificationPageData;
+
+            let imageBuffer: Buffer | undefined;
+            if (
+                this.lightdashConfig.smtp?.inlineImageCid === true &&
+                imageS3Key &&
+                this.fileStorageClient.isEnabled()
+            ) {
+                try {
+                    const stream =
+                        await this.fileStorageClient.getFileStream(imageS3Key);
+                    const chunks: Buffer[] = [];
+                    for await (const chunk of stream) {
+                        chunks.push(
+                            Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+                        );
+                    }
+                    imageBuffer = Buffer.concat(chunks);
+                } catch (e) {
+                    Logger.warn(
+                        `Failed to stream CID inline image from S3 (key: ${imageS3Key}), falling back to external image URL: ${e}`,
+                    );
+                }
+            }
 
             const schedulerUrl = `${url}?${setUuidParam(
                 'scheduler_uuid',
@@ -2387,7 +2412,7 @@ export default class SchedulerTask {
                     pdfFile?.source,
                     undefined, // expiration days
                     'This is a data alert sent by Lightdash',
-                    imageLocalPath,
+                    imageBuffer,
                 );
             } else if (format === SchedulerFormat.IMAGE) {
                 if (imageUrl === undefined) {
@@ -2411,7 +2436,7 @@ export default class SchedulerTask {
                     pdfFile?.source,
                     Math.ceil(emailExpiration / 86400),
                     undefined, // deliveryType
-                    imageLocalPath,
+                    imageBuffer,
                 );
             } else if (savedChartUuid) {
                 if (csvUrl === undefined) {
@@ -2481,10 +2506,7 @@ export default class SchedulerTask {
                     type: 'email',
                     format,
                     withPdf: pdfFile !== undefined,
-                    resourceType:
-                        pageType === LightdashPage.CHART
-                            ? 'chart'
-                            : 'dashboard',
+                    ...getSchedulerResourceTypeAndId(scheduler),
                     sendNow: schedulerUuid === undefined,
                     isThresholdAlert: scheduler.thresholds !== undefined,
                 },
@@ -2722,6 +2744,7 @@ export default class SchedulerTask {
                             QueryExecutionContext.SCHEDULED_GSHEETS_DASHBOARD,
                         pivotResults: shouldPivot,
                     },
+                    SCHEDULER_POLLING_OPTIONS,
                 );
 
                 if (thresholds !== undefined && thresholds.length > 0) {
@@ -2888,6 +2911,7 @@ export default class SchedulerTask {
                                 pivotResults: shouldPivotChart,
                                 parameters: dashboardParameters,
                             },
+                            SCHEDULER_POLLING_OPTIONS,
                         );
                         const showTableNames = isTableChartConfig(
                             chart.chartConfig.config,
@@ -2950,6 +2974,68 @@ export default class SchedulerTask {
                         Logger.debug('Error processing charts:', error);
                         throw error;
                     });
+            } else if (scheduler.savedSqlUuid) {
+                const sqlChart =
+                    await this.asyncQueryService.savedSqlModel.getByUuid(
+                        scheduler.savedSqlUuid,
+                        {},
+                    );
+                deliveryUrl = `${this.lightdashConfig.siteUrl}/projects/${sqlChart.project.projectUuid}/sql-runner/${sqlChart.slug}?${schedulerUuidParam}&isSync=true`;
+
+                const defaultSchedulerTimezone =
+                    await this.schedulerService.getSchedulerDefaultTimezone(
+                        schedulerUuid,
+                    );
+
+                const refreshToken = await this.userService.getRefreshToken(
+                    scheduler.createdBy,
+                );
+
+                // Execute the SQL chart query using the chart's visualization config
+                // This produces the same pivoted/aggregated results that the chart shows
+                const { rows } =
+                    await this.asyncQueryService.executeSqlChartQueryAndGetResults(
+                        {
+                            account,
+                            projectUuid: sqlChart.project.projectUuid,
+                            savedSqlUuid: scheduler.savedSqlUuid,
+                            invalidateCache: true,
+                            context:
+                                QueryExecutionContext.SCHEDULED_GSHEETS_SQL_CHART,
+                        },
+                        SCHEDULER_POLLING_OPTIONS,
+                    );
+
+                await this.googleDriveClient.uploadMetadata(
+                    refreshToken,
+                    gdriveId,
+                    getHumanReadableCronExpression(
+                        scheduler.cron,
+                        scheduler.timezone || defaultSchedulerTimezone,
+                    ),
+                    undefined,
+                    deliveryUrl,
+                );
+
+                // Convert rows to string[][] for Google Sheets
+                const columnNames = rows.length > 0 ? Object.keys(rows[0]) : [];
+                const headerRow = columnNames;
+                const dataRows = rows.map((row) =>
+                    columnNames.map((col) => {
+                        const value = row[col];
+                        if (value === null || value === undefined) return '';
+                        if (value instanceof Date) return value.toISOString();
+                        return String(value);
+                    }),
+                );
+                const csvData = [headerRow, ...dataRows];
+
+                await this.googleDriveClient.appendCsvToSheet(
+                    refreshToken,
+                    gdriveId,
+                    csvData,
+                    tabName,
+                );
             } else {
                 throw new UnexpectedServerError('Not implemented');
             }
@@ -2967,7 +3053,7 @@ export default class SchedulerTask {
                     groupId: notification.jobGroup,
                     type: 'gsheets',
                     format,
-                    resourceType: savedChartUuid ? 'chart' : 'dashboard',
+                    ...getSchedulerResourceTypeAndId(scheduler),
                     sendNow: schedulerUuid === undefined,
                 },
             });
@@ -3290,6 +3376,7 @@ export default class SchedulerTask {
                                 chartUuid: savedChartUuid,
                                 context: QueryExecutionContext.SCHEDULED_CHART,
                             },
+                            SCHEDULER_POLLING_OPTIONS,
                         );
 
                     if (
@@ -3706,7 +3793,7 @@ export default class SchedulerTask {
 
                 const limit = pLimit(5);
 
-                const isInSelectedTab = (tile: { tabUuid?: string }) =>
+                const isInSelectedTab = (tile: { tabUuid?: string | null }) =>
                     !selectedTabs ||
                     !tile.tabUuid ||
                     selectedTabs.includes(tile.tabUuid);
@@ -3934,19 +4021,22 @@ export default class SchedulerTask {
         const chart =
             await this.schedulerService.savedChartModel.get(chartUuid);
         const downloadResult =
-            await this.asyncQueryService.downloadSyncQueryResults({
-                account,
-                projectUuid,
-                queryUuid: query.queryUuid,
-                type: DownloadFileType.CSV,
-                onlyRaw: false,
-                customLabels: getCustomLabelsFromTableConfig(
-                    chart.chartConfig.config,
-                ),
-                hiddenFields: getHiddenTableFields(chart.chartConfig),
-                pivotConfig: getPivotConfig(chart),
-                columnOrder: chart.tableConfig.columnOrder,
-            });
+            await this.asyncQueryService.downloadSyncQueryResults(
+                {
+                    account,
+                    projectUuid,
+                    queryUuid: query.queryUuid,
+                    type: DownloadFileType.CSV,
+                    onlyRaw: false,
+                    customLabels: getCustomLabelsFromTableConfig(
+                        chart.chartConfig.config,
+                    ),
+                    hiddenFields: getHiddenTableFields(chart.chartConfig),
+                    pivotConfig: getPivotConfig(chart),
+                    columnOrder: chart.tableConfig.columnOrder,
+                },
+                SCHEDULER_POLLING_OPTIONS,
+            );
         return {
             chartName: chart.name,
             filename: chart.name,
@@ -3993,22 +4083,31 @@ export default class SchedulerTask {
             },
         );
         const downloadResult =
-            await this.asyncQueryService.downloadSyncQueryResults({
-                account,
-                projectUuid,
-                queryUuid: query.queryUuid,
-                type: DownloadFileType.CSV,
-                onlyRaw: false,
-                customLabels: getCustomLabelsFromVizTableConfig(
-                    isVizTableConfig(chart.config) ? chart.config : undefined,
-                ),
-                hiddenFields: getHiddenFieldsFromVizTableConfig(
-                    isVizTableConfig(chart.config) ? chart.config : undefined,
-                ),
-                columnOrder: getColumnOrderFromVizTableConfig(
-                    isVizTableConfig(chart.config) ? chart.config : undefined,
-                ),
-            });
+            await this.asyncQueryService.downloadSyncQueryResults(
+                {
+                    account,
+                    projectUuid,
+                    queryUuid: query.queryUuid,
+                    type: DownloadFileType.CSV,
+                    onlyRaw: false,
+                    customLabels: getCustomLabelsFromVizTableConfig(
+                        isVizTableConfig(chart.config)
+                            ? chart.config
+                            : undefined,
+                    ),
+                    hiddenFields: getHiddenFieldsFromVizTableConfig(
+                        isVizTableConfig(chart.config)
+                            ? chart.config
+                            : undefined,
+                    ),
+                    columnOrder: getColumnOrderFromVizTableConfig(
+                        isVizTableConfig(chart.config)
+                            ? chart.config
+                            : undefined,
+                    ),
+                },
+                SCHEDULER_POLLING_OPTIONS,
+            );
         return {
             chartName: chart.name,
             filename: chart.name,
@@ -4976,10 +5075,7 @@ export default class SchedulerTask {
                     groupId: notification.jobGroup,
                     type: 'googlechat',
                     format,
-                    resourceType:
-                        pageType === LightdashPage.CHART
-                            ? 'chart'
-                            : 'dashboard',
+                    ...getSchedulerResourceTypeAndId(scheduler),
                     sendNow: schedulerUuid === undefined,
                     isThresholdAlert: scheduler.thresholds !== undefined,
                 },

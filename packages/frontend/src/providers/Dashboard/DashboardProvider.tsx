@@ -151,6 +151,7 @@ const DashboardProvider: React.FC<
 
     const { data: dashboardComments } = useGetComments(
         dashboardUuid,
+        projectUuid,
         !!dashboardCommentsCheck &&
             !!dashboardCommentsCheck.canViewDashboardComments,
     );
@@ -720,6 +721,23 @@ const DashboardProvider: React.FC<
         resetSavedFilterOverrides,
     } = useSavedDashboardFiltersOverrides();
 
+    // Stable key that only changes when the chart-tile mapping changes,
+    // not when tiles are repositioned/resized (x/y/w/h changes).
+    // This prevents unnecessary re-renders of the entire filter chain
+    // during drag/resize operations.
+    const savedChartUuidsAndTileUuidsKey = useMemo(
+        () =>
+            dashboardTiles
+                ?.filter(isDashboardChartTileType)
+                .map(
+                    (tile) =>
+                        `${tile.uuid}:${tile.properties.savedChartUuid ?? ''}`,
+                )
+                .sort()
+                .join(',') ?? '',
+        [dashboardTiles],
+    );
+
     const savedChartUuidsAndTileUuids = useMemo(
         () =>
             dashboardTiles
@@ -736,8 +754,52 @@ const DashboardProvider: React.FC<
                     },
                     [],
                 ),
-        [dashboardTiles],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [savedChartUuidsAndTileUuidsKey],
     );
+
+    const {
+        isInitialLoading: isLoadingDashboardFilters,
+        isFetching: isFetchingDashboardFilters,
+        data: dashboardAvailableFiltersData,
+    } = useDashboardsAvailableFilters(
+        savedChartUuidsAndTileUuids ?? [],
+        projectUuid,
+        embedToken,
+    );
+
+    const filterableFieldsByTileUuid = useMemo(() => {
+        // If this is an embed dashboard, we skip the dashboard check
+        if (
+            (!dashboard && !embedToken) ||
+            !savedChartUuidsAndTileUuids ||
+            !dashboardAvailableFiltersData
+        )
+            return;
+
+        return savedChartUuidsAndTileUuids.reduce<
+            Record<string, FilterableDimension[]>
+        >((acc, { tileUuid }) => {
+            const filterFields =
+                dashboardAvailableFiltersData.savedQueryFilters[tileUuid]?.map(
+                    (index) =>
+                        dashboardAvailableFiltersData.allFilterableFields[
+                            index
+                        ],
+                );
+
+            if (filterFields) {
+                acc[tileUuid] = filterFields;
+            }
+
+            return acc;
+        }, {});
+    }, [
+        dashboard,
+        dashboardAvailableFiltersData,
+        savedChartUuidsAndTileUuids,
+        embedToken,
+    ]);
 
     /**
      * Apply interactivity filtering for embedded dashboards
@@ -801,8 +863,18 @@ const DashboardProvider: React.FC<
             const sdkFilters =
                 embed.mode === 'sdk' && embed.filters ? embed.filters : [];
             if (sdkFilters.length > 0) {
+                // Wait for available filters query to finish (success or error)
+                // so we can build cross-explore tileTargets.
+                // If the query failed, filterableFieldsByTileUuid will be
+                // undefined and we gracefully fall back to tileTargets: {}
+                if (isLoadingDashboardFilters) return;
+
                 updatedDashboardFilters.dimensions = sdkFilters.map(
-                    (sdkFilter) => convertSdkFilterToDashboardFilter(sdkFilter),
+                    (sdkFilter) =>
+                        convertSdkFilterToDashboardFilter(
+                            sdkFilter,
+                            filterableFieldsByTileUuid,
+                        ),
                 );
             }
 
@@ -852,6 +924,8 @@ const DashboardProvider: React.FC<
         overridesForSavedDashboardFilters,
         embed,
         applyInteractivityFiltering,
+        isLoadingDashboardFilters,
+        filterableFieldsByTileUuid,
     ]);
 
     // Updates url with temp and overridden filters and deep compare to avoid unnecessary re-renders for dashboardTemporaryFilters
@@ -1031,52 +1105,6 @@ const DashboardProvider: React.FC<
         dateZoomGranularity,
         defaultDateZoomGranularity,
         setDateZoomGranularity,
-    ]);
-
-    const {
-        isInitialLoading: isLoadingDashboardFilters,
-        isFetching: isFetchingDashboardFilters,
-        data: dashboardAvailableFiltersData,
-    } = useDashboardsAvailableFilters(
-        savedChartUuidsAndTileUuids ?? [],
-        projectUuid,
-        embedToken,
-    );
-
-    const filterableFieldsByTileUuid = useMemo(() => {
-        // If this is an embed dashboard, we skip the dashboard check
-        if (
-            (!dashboard && !embedToken) ||
-            !dashboardTiles ||
-            !dashboardAvailableFiltersData
-        )
-            return;
-
-        const filterFieldsMapping = savedChartUuidsAndTileUuids?.reduce<
-            Record<string, FilterableDimension[]>
-        >((acc, { tileUuid }) => {
-            const filterFields =
-                dashboardAvailableFiltersData.savedQueryFilters[tileUuid]?.map(
-                    (index) =>
-                        dashboardAvailableFiltersData.allFilterableFields[
-                            index
-                        ],
-                );
-
-            if (filterFields) {
-                acc[tileUuid] = filterFields;
-            }
-
-            return acc;
-        }, {});
-
-        return filterFieldsMapping;
-    }, [
-        dashboard,
-        dashboardTiles,
-        dashboardAvailableFiltersData,
-        savedChartUuidsAndTileUuids,
-        embedToken,
     ]);
 
     const allFilterableFieldsMap = useMemo(() => {
@@ -1410,7 +1438,7 @@ const DashboardProvider: React.FC<
 
     const tileTabsById = useMemo(() => {
         if (!dashboardTiles) return {};
-        return dashboardTiles.reduce<Record<string, string | undefined>>(
+        return dashboardTiles.reduce<Record<string, string | null | undefined>>(
             (acc, tile) => {
                 acc[tile.uuid] = tile.tabUuid;
                 return acc;

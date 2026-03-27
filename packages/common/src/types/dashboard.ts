@@ -1,9 +1,11 @@
+import { type ContentVerificationInfo } from './contentVerification';
 import { type FilterableDimension } from './field';
 import { type DashboardFilters } from './filter';
 import { type KnexPaginatedData } from './knex-paginate';
 import { type DashboardParameters } from './parameters';
 import {
     type ChartKind,
+    type ChartVersionSummary,
     type CreateSavedChart,
     type SavedChartType,
 } from './savedCharts';
@@ -28,7 +30,7 @@ type CreateDashboardTileBase = {
     y: number;
     h: number;
     w: number;
-    tabUuid: string | undefined;
+    tabUuid: string | null | undefined;
 };
 
 type DashboardTileBase = Required<CreateDashboardTileBase>;
@@ -186,6 +188,7 @@ export type Dashboard = {
     versionUuid: string;
     uuid: string;
     name: string;
+    verification: ContentVerificationInfo | null;
     description?: string;
     updatedAt: Date;
     tiles: Array<DashboardTile>;
@@ -243,7 +246,10 @@ export type DashboardBasicDetails = Pick<
     | 'firstViewedAt'
     | 'pinnedListUuid'
     | 'pinnedListOrder'
-> & { validationErrors?: ValidationSummary[] };
+> & {
+    validationErrors?: ValidationSummary[];
+    verification: ContentVerificationInfo | null;
+};
 
 export type DashboardBasicDetailsWithTileTypes = DashboardBasicDetails & {
     tileTypes: DashboardTileTypes[];
@@ -395,9 +401,27 @@ export type DashboardHistory = {
     history: DashboardVersionSummary[];
 };
 
+export type ChartVersionDifference = {
+    tileUuid: string;
+    chartUuid: string;
+    chartName: string | null;
+    currentVersion?: ChartVersionSummary | null;
+    selectedVersion?: ChartVersionSummary | null;
+};
+
+export type DashboardVersion = DashboardVersionSummary & {
+    dashboard: Dashboard;
+    chartVersionDifferences?: ChartVersionDifference[];
+};
+
 export type ApiGetDashboardHistoryResponse = {
     status: 'ok';
     results: DashboardHistory;
+};
+
+export type ApiGetDashboardVersionResponse = {
+    status: 'ok';
+    results: DashboardVersion;
 };
 
 export type ApiDashboardRollbackResponse = {

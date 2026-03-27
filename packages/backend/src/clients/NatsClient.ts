@@ -6,10 +6,12 @@ import {
     DebugEvents,
     Events,
     nanos,
+    NatsError,
     RetentionPolicy,
     StorageType,
     StringCodec,
     type JetStreamClient,
+    type JetStreamManager,
     type NatsConnection,
     type Status,
 } from 'nats';
@@ -30,6 +32,7 @@ type EnqueueResult = Promise<{ jobId: string }>;
 export interface INatsClient {
     enqueueWarehouseQuery(payload: AsyncQueryJobPayload): EnqueueResult;
     enqueuePreAggregateQuery(payload: AsyncQueryJobPayload): EnqueueResult;
+    enqueueMaterializationQuery(payload: AsyncQueryJobPayload): EnqueueResult;
 }
 
 type NatsClientArgs = {
@@ -108,43 +111,93 @@ export class NatsClient implements INatsClient {
 
     // ── Stream infrastructure ───────────────────────────────────
 
-    /** Idempotently create the selected streams + consumers for worker startup. */
-    async ensureStreams(streams: StreamConfig[]): Promise<void> {
-        this.managedStreams = streams;
+    async ensureStreamsAndConsumers(
+        managedStreams: StreamConfig[],
+    ): Promise<void> {
+        this.managedStreams = managedStreams;
         if (this.managedStreams.length === 0) return;
 
         const conn = await this.getOrCreateConnection();
         const jsm = await conn.jetstreamManager();
         await Promise.all(
-            this.managedStreams.map(
-                async (config: StreamConfig): Promise<void> => {
-                    await jsm.streams.add({
-                        name: config.streamName,
-                        subjects: Object.values(config.subjects),
-                        retention: RetentionPolicy.Workqueue,
-                        storage: StorageType.Memory,
-                        num_replicas: 1,
-                    });
-
-                    // consumers.add with filter_subjects uses the old
-                    // DURABLE.CREATE API which is not idempotent — check first
-                    const consumerExists = await jsm.consumers
-                        .info(config.streamName, config.durableName)
-                        .then(() => true)
-                        .catch(() => false);
-
-                    if (!consumerExists) {
-                        await jsm.consumers.add(config.streamName, {
-                            durable_name: config.durableName,
-                            filter_subjects: Object.values(config.subjects),
-                            ack_policy: AckPolicy.Explicit,
-                            ack_wait: nanos(ACK_WAIT_MS),
-                            max_deliver: 1,
-                        });
-                    }
-                },
-            ),
+            this.managedStreams.map(async (streamConfig: StreamConfig) => {
+                await NatsClient.ensureStream(jsm, streamConfig);
+                await NatsClient.ensureConsumer(jsm, streamConfig);
+            }),
         );
+    }
+
+    /** Create or update a JetStream stream.
+     *  Note: `retention` and `storage` are immutable after creation —
+     *  changing them here requires deleting and recreating the stream.
+     */
+
+    private static async ensureStream(
+        jsm: JetStreamManager,
+        streamConfig: StreamConfig,
+    ): Promise<void> {
+        const subjects = Object.values(streamConfig.subjects);
+
+        const existing = await jsm.streams
+            .info(streamConfig.streamName)
+            .catch((e: unknown) => {
+                if (e instanceof NatsError && e.code === '404') return null;
+                throw e;
+            });
+
+        const jetStreamConfig = {
+            subjects, // mutable — safe to update (e.g. when new subjects are added)
+            retention: RetentionPolicy.Workqueue, // immutable after creation
+            storage: StorageType.Memory, // immutable after creation
+            num_replicas: 1,
+        };
+
+        if (existing) {
+            await jsm.streams.update(streamConfig.streamName, jetStreamConfig);
+        } else {
+            await jsm.streams.add({
+                name: streamConfig.streamName,
+                ...jetStreamConfig,
+            });
+        }
+    }
+
+    /** Create or update a durable JetStream consumer.
+     *  Note: `ack_policy` and `max_deliver` are immutable after creation —
+     *  changing them here requires deleting and recreating the consumer.
+     */
+    private static async ensureConsumer(
+        jsm: JetStreamManager,
+        streamConfig: StreamConfig,
+    ): Promise<void> {
+        const subjects = Object.values(streamConfig.subjects);
+
+        const existing = await jsm.consumers
+            .info(streamConfig.streamName, streamConfig.durableName)
+            .catch((e: unknown) => {
+                if (e instanceof NatsError && e.code === '404') return null;
+                throw e;
+            });
+
+        const jetStreamConsumerConfig = {
+            filter_subjects: subjects, // mutable since NATS 2.10
+            ack_policy: AckPolicy.Explicit, // immutable after creation
+            ack_wait: nanos(ACK_WAIT_MS),
+            max_deliver: 1, // immutable after creation
+        };
+
+        if (existing) {
+            await jsm.consumers.update(
+                streamConfig.streamName,
+                streamConfig.durableName,
+                jetStreamConsumerConfig,
+            );
+        } else {
+            await jsm.consumers.add(streamConfig.streamName, {
+                durable_name: streamConfig.durableName,
+                ...jetStreamConsumerConfig,
+            });
+        }
     }
 
     // ── Publishing (INatsClient) ─────────────────────────────
@@ -160,6 +213,15 @@ export class NatsClient implements INatsClient {
     ): Promise<{ jobId: string }> {
         return this.enqueue(
             STREAM_CONFIGS['pre-aggregate'].subjects.query,
+            payload,
+        );
+    }
+
+    async enqueueMaterializationQuery(
+        payload: AsyncQueryJobPayload,
+    ): Promise<{ jobId: string }> {
+        return this.enqueue(
+            STREAM_CONFIGS['pre-aggregate'].subjects.materialization,
             payload,
         );
     }
@@ -212,7 +274,7 @@ export class NatsClient implements INatsClient {
                 return;
             case Events.Reconnect:
                 Logger.info(`${tag} reconnected to ${status.data}`);
-                this.reensureManagedStreams().catch((error) => {
+                this.reconnectStreamsAndConsumers().catch((error) => {
                     Logger.error(
                         `${tag} failed to re-ensure streams after reconnect: ${getErrorMessage(error)}`,
                     );
@@ -313,8 +375,7 @@ export class NatsClient implements INatsClient {
         );
     }
 
-    private async reensureManagedStreams(): Promise<void> {
-        if (this.managedStreams.length === 0) return;
-        await this.ensureStreams(this.managedStreams);
+    private async reconnectStreamsAndConsumers(): Promise<void> {
+        await this.ensureStreamsAndConsumers(this.managedStreams);
     }
 }

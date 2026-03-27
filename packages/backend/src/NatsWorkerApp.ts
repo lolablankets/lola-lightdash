@@ -4,6 +4,7 @@ import express from 'express';
 import http from 'http';
 import knex, { Knex } from 'knex';
 import { LightdashAnalytics } from './analytics/LightdashAnalytics';
+import { registerOAuthRefreshStrategies } from './auth/registerOAuthRefreshStrategies';
 import {
     ClientProviderMap,
     ClientRepository,
@@ -146,6 +147,7 @@ export default class NatsWorkerApp {
     }
 
     public async start() {
+        registerOAuthRefreshStrategies();
         this.prometheusMetrics.start();
         this.prometheusMetrics.monitorDatabase(this.database);
         // @ts-ignore
@@ -180,7 +182,7 @@ export default class NatsWorkerApp {
     }> {
         const natsClient = this.clients.getNatsClient();
         await natsClient.connect();
-        await natsClient.ensureStreams(
+        await natsClient.ensureStreamsAndConsumers(
             this.streams.map((stream) => STREAM_CONFIGS[stream]),
         );
 

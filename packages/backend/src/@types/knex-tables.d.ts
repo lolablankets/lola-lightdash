@@ -33,6 +33,10 @@ import {
     DashboardTileCommentsTableName,
 } from '../database/entities/comments';
 import {
+    ContentVerificationTable,
+    ContentVerificationTableName,
+} from '../database/entities/contentVerification';
+import {
     DashboardsTableName,
     DashboardTable,
     DashboardTabsTable,
@@ -149,12 +153,6 @@ import {
     PinnedSpaceTable,
     PinnedSpaceTableName,
 } from '../database/entities/pinnedList';
-import {
-    PreAggregateDefinitionsTable,
-    PreAggregateDefinitionsTableName,
-    PreAggregateMaterializationsTable,
-    PreAggregateMaterializationsTableName,
-} from '../database/entities/preAggregates';
 import {
     ProjectGroupAccessTable,
     ProjectGroupAccessTableName,
@@ -335,6 +333,16 @@ import {
     DashboardSummariesTableName,
 } from '../ee/database/entities/dashboardSummaries';
 import {
+    PreAggregateDailyStatsTable,
+    PreAggregateDailyStatsTableName,
+} from '../ee/database/entities/preAggregateDailyStats';
+import {
+    PreAggregateDefinitionsTable,
+    PreAggregateDefinitionsTableName,
+    PreAggregateMaterializationsTable,
+    PreAggregateMaterializationsTableName,
+} from '../ee/database/entities/preAggregates';
+import {
     ServiceAccountsTableName,
     ServiceAccountTable,
 } from '../ee/database/entities/serviceAccounts';
@@ -466,5 +474,6 @@ declare module 'knex/types/tables' {
         [ChangesetsTableName]: ChangesetsTable;
         [ChangesTableName]: ChangesTable;
         [UserFavoritesTableName]: UserFavoritesTable;
+        [ContentVerificationTableName]: ContentVerificationTable;
     }
 }

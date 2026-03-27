@@ -9,6 +9,7 @@ import {
     type DashboardFilters,
     type DashboardHistory,
     type DashboardTile,
+    type DashboardVersion,
     type DateGranularity,
     type SavedChartsInfoForDashboardAvailableFilters,
     type UpdateDashboard,
@@ -29,14 +30,13 @@ import { invalidateContent } from '../useContent';
 import useQueryError from '../useQueryError';
 import useDashboardStorage from './useDashboardStorage';
 
-const getDashboard = async (id: string, projectUuid?: string) => {
-    const query = projectUuid ? `?projectUuid=${projectUuid}` : '';
-    return lightdashApi<Dashboard>({
-        url: `/dashboards/${id}${query}`,
+const getDashboard = async (id: string, projectUuid: string) =>
+    lightdashApi<Dashboard>({
+        url: `/projects/${projectUuid}/dashboards/${id}`,
+        version: 'v2',
         method: 'GET',
         body: undefined,
     });
-};
 
 const createDashboard = async (projectUuid: string, data: CreateDashboard) =>
     lightdashApi<Dashboard>({
@@ -66,16 +66,22 @@ const duplicateDashboard = async (
         body: JSON.stringify(data),
     });
 
-const updateDashboard = async (id: string, data: UpdateDashboard) =>
+const updateDashboard = async (
+    id: string,
+    data: UpdateDashboard,
+    projectUuid: string,
+) =>
     lightdashApi<Dashboard>({
-        url: `/dashboards/${id}`,
+        url: `/projects/${projectUuid}/dashboards/${id}`,
+        version: 'v2',
         method: 'PATCH',
         body: JSON.stringify(data),
     });
 
-const deleteDashboard = async (id: string) =>
+const deleteDashboard = async (id: string, projectUuid: string) =>
     lightdashApi<null>({
-        url: `/dashboards/${id}`,
+        url: `/projects/${projectUuid}/dashboards/${id}`,
+        version: 'v2',
         method: 'DELETE',
         body: undefined,
     });
@@ -142,8 +148,11 @@ export const useDashboardQuery = ({
     const setErrorResponse = useQueryError();
     return useQuery<Dashboard, ApiError>({
         queryKey: ['saved_dashboard_query', uuidOrSlug, projectUuid],
-        queryFn: () => getDashboard(uuidOrSlug || '', projectUuid),
-        enabled: !!uuidOrSlug,
+        queryFn: async () => {
+            if (!projectUuid) throw new Error('projectUuid is required');
+            return getDashboard(uuidOrSlug || '', projectUuid);
+        },
+        enabled: !!uuidOrSlug && !!projectUuid,
         retry: false,
         onError: (result) => setErrorResponse(result),
         ...useQueryOptions,
@@ -169,6 +178,9 @@ export const useDashboardVersionRefresh = (
             try {
                 if (!currentDashboard) {
                     throw new Error('Current dashboard is undefined');
+                }
+                if (!projectUuid) {
+                    throw new Error('Project UUID is undefined');
                 }
 
                 const latestDashboard = await getDashboard(
@@ -368,22 +380,25 @@ export const useExportCsvDashboard = () => {
 };
 
 export const useUpdateDashboard = (
-    id?: string,
+    id: string | undefined,
+    projectUuid: string | undefined,
     showRedirectButton: boolean = false,
     onSuccessCallback?: (dashboard: Dashboard) => void,
 ) => {
     const navigate = useNavigate();
-    const { projectUuid } = useParams<{ projectUuid: string }>();
     const queryClient = useQueryClient();
     const { showToastSuccess, showToastApiError } = useToaster();
     const { clearDashboardStorage } = useDashboardStorage();
     return useMutation<Dashboard, ApiError, UpdateDashboard>(
         (data) => {
-            if (id === undefined) {
+            if (!id) {
                 throw new Error('Dashboard id is undefined');
             }
+            if (!projectUuid) {
+                throw new Error('Project UUID is undefined');
+            }
 
-            return updateDashboard(id, data);
+            return updateDashboard(id, data, projectUuid);
         },
         {
             mutationKey: ['dashboard_update'],
@@ -604,24 +619,30 @@ export const useDuplicateDashboardMutation = (
     );
 };
 
-export const useDashboardDeleteMutation = () => {
+export const useDashboardDeleteMutation = (projectUuid?: string) => {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
-    const { projectUuid } = useParams<{ projectUuid: string }>();
     const { health } = useApp();
     const isSoftDeleteEnabled = health.data?.softDelete.enabled ?? false;
     const { showToastSuccess, showToastApiError } = useToaster();
-    return useMutation<null, ApiError, string>(deleteDashboard, {
-        onSuccess: async () => {
-            await invalidateContent(queryClient, projectUuid!);
-            await queryClient.invalidateQueries([
-                'dashboards-containing-chart',
-            ]);
-            await queryClient.invalidateQueries(['deletedContent']);
-            showToastSuccess({
-                title: `Deleted! Dashboard was deleted.`,
-                action:
-                    isSoftDeleteEnabled && projectUuid
+    return useMutation<null, ApiError, string>(
+        (id) => {
+            if (!projectUuid) {
+                throw new Error('Project UUID is undefined');
+            }
+            return deleteDashboard(id, projectUuid);
+        },
+        {
+            onSuccess: async () => {
+                if (!projectUuid) return;
+                await invalidateContent(queryClient, projectUuid);
+                await queryClient.invalidateQueries([
+                    'dashboards-containing-chart',
+                ]);
+                await queryClient.invalidateQueries(['deletedContent']);
+                showToastSuccess({
+                    title: `Deleted! Dashboard was deleted.`,
+                    action: isSoftDeleteEnabled
                         ? {
                               children: 'Go to recently deleted',
                               icon: IconArrowRight,
@@ -631,15 +652,16 @@ export const useDashboardDeleteMutation = () => {
                                   ),
                           }
                         : undefined,
-            });
+                });
+            },
+            onError: ({ error }) => {
+                showToastApiError({
+                    title: `Failed to delete dashboard`,
+                    apiError: error,
+                });
+            },
         },
-        onError: ({ error }) => {
-            showToastApiError({
-                title: `Failed to delete dashboard`,
-                apiError: error,
-            });
-        },
-    });
+    );
 };
 
 const getDashboardHistory = async (
@@ -656,6 +678,28 @@ export const useDashboardHistory = (dashboardUuid: string | undefined) =>
         queryKey: ['dashboard_history', dashboardUuid],
         queryFn: () => getDashboardHistory(dashboardUuid!),
         enabled: dashboardUuid !== undefined,
+        retry: false,
+    });
+
+const getDashboardVersion = async (
+    dashboardUuid: string,
+    versionUuid: string,
+): Promise<DashboardVersion> => {
+    return lightdashApi<DashboardVersion>({
+        url: `/dashboards/${dashboardUuid}/version/${versionUuid}`,
+        method: 'GET',
+        body: undefined,
+    });
+};
+
+export const useDashboardVersion = (
+    dashboardUuid: string | undefined,
+    versionUuid: string | undefined,
+) =>
+    useQuery<DashboardVersion, ApiError>({
+        queryKey: ['dashboard_version', dashboardUuid, versionUuid],
+        queryFn: () => getDashboardVersion(dashboardUuid!, versionUuid!),
+        enabled: dashboardUuid !== undefined && versionUuid !== undefined,
         retry: false,
     });
 
@@ -682,14 +726,43 @@ export const useDashboardVersionRollbackMutation = (
         {
             mutationKey: ['dashboard_version_rollback'],
             onSuccess: async () => {
+                // Invalidate dashboard query to refresh dashboard data
                 await queryClient.invalidateQueries([
                     'saved_dashboard_query',
                     dashboardUuid,
                 ]);
+
+                // Invalidate dashboard history to reflect new version
                 await queryClient.invalidateQueries([
                     'dashboard_history',
                     dashboardUuid,
                 ]);
+
+                // Invalidate dashboard version queries
+                await queryClient.invalidateQueries([
+                    'dashboard_version',
+                    dashboardUuid,
+                ]);
+
+                // Invalidate all saved chart queries to refresh chart data
+                // This will force reload of any charts that were rolled back
+                await queryClient.invalidateQueries(['saved_query']);
+
+                // Invalidate chart history queries for any affected charts
+                await queryClient.invalidateQueries(['chart_history']);
+
+                // Invalidate chart version queries
+                await queryClient.invalidateQueries(['chart_version']);
+
+                // Invalidate the project charts list in case chart metadata changed
+                await queryClient.invalidateQueries(['project']);
+
+                // Invalidate SQL charts that might be in dashboard tiles
+                await queryClient.invalidateQueries([
+                    'sqlRunner',
+                    'savedSqlChart',
+                ]);
+
                 showToastSuccess({
                     title: `Success! Dashboard was reverted.`,
                 });

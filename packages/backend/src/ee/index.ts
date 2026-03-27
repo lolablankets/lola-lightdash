@@ -1,11 +1,12 @@
-import { ForbiddenError } from '@lightdash/common';
+import { ForbiddenError, isExploreError } from '@lightdash/common';
 import express, { Express } from 'express';
 import { AppArguments } from '../App';
 import { lightdashConfig } from '../config/lightdashConfig';
 import Logger from '../logging/logger';
 import { McpContextModel } from '../models/McpContextModel';
+import { registerPreAggregateStream } from '../nats/natsConfig';
 import { AsyncQueryService } from '../services/AsyncQueryService/AsyncQueryService';
-import { PreAggregationDuckDbClient } from '../services/AsyncQueryService/PreAggregationDuckDbClient';
+import { DeployService } from '../services/DeployService';
 import { InstanceConfigurationService } from '../services/InstanceConfigurationService/InstanceConfigurationService';
 import { ProjectService } from '../services/ProjectService/ProjectService';
 import { RolesService } from '../services/RolesService/RolesService';
@@ -20,12 +21,17 @@ import { CommercialSlackAuthenticationModel } from './models/CommercialSlackAuth
 import { DashboardSummaryModel } from './models/DashboardSummaryModel';
 import { EmbedModel } from './models/EmbedModel';
 import { ServiceAccountModel } from './models/ServiceAccountModel';
+import { generatePreAggregateExplores } from './preAggregates/generatePreAggregateExplores';
+import { preAggregatePostProcessor } from './preAggregates/postProcessor';
 import { CommercialSchedulerClient } from './scheduler/SchedulerClient';
 import { CommercialSchedulerWorker } from './scheduler/SchedulerWorker';
 import { AiAgentAdminService } from './services/AiAgentAdminService';
 import { AiAgentService } from './services/AiAgentService/AiAgentService';
 import { AiOrganizationSettingsService } from './services/AiOrganizationSettingsService';
 import { AiService } from './services/AiService/AiService';
+import { AppGenerateService } from './services/AppGenerateService/AppGenerateService';
+import { PreAggregateStrategy } from './services/AsyncQueryService/PreAggregateStrategy';
+import { PreAggregationDuckDbClient } from './services/AsyncQueryService/PreAggregationDuckDbClient';
 import { CommercialCacheService } from './services/CommercialCacheService';
 import { CommercialSlackIntegrationService } from './services/CommercialSlackIntegrationService';
 import { EmbedService } from './services/EmbedService/EmbedService';
@@ -46,54 +52,32 @@ type EnterpriseAppArguments = Pick<
 >;
 
 export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArguments> {
-    const isDevelopment = process.env.NODE_ENV === 'development';
-
     if (!lightdashConfig.license.licenseKey) {
-        if (isDevelopment) {
-            Logger.info(
-                'No license key found — registering enterprise providers in development mode.',
-            );
-        } else {
-            return {};
-        }
-    } else {
-        try {
-            const licenseClient = new LicenseClient({});
-            Logger.debug('Initializing license client for validation');
-
-            const license = await licenseClient.get(
-                lightdashConfig.license.licenseKey,
-            );
-
-            if (license.isValid) {
-                Logger.info(
-                    `Enterprise license for ${lightdashConfig.siteUrl} is valid.`,
-                );
-            } else {
-                Logger.error(
-                    `Enterprise license validation failed for ${lightdashConfig.siteUrl}: ${license.detail} [${license.code}]`,
-                );
-                throw new ForbiddenError(
-                    `Enterprise license for ${lightdashConfig.siteUrl} ${license.detail} [${license.code}]`,
-                );
-            }
-        } catch (error) {
-            if (error instanceof ForbiddenError) {
-                throw error;
-            }
-
-            Logger.error(
-                `Failed to validate enterprise license for ${lightdashConfig.siteUrl}:`,
-                error,
-            );
-            throw new Error(
-                `Unable to validate enterprise license: ${error instanceof Error ? error.message : String(error)}`,
-            );
-        }
+        return {};
     }
+
+    const licenseClient = new LicenseClient({});
+
+    const license = await licenseClient.get(lightdashConfig.license.licenseKey);
+    if (license.isValid) {
+        Logger.info(
+            `Enterprise license for ${lightdashConfig.siteUrl} is valid.`,
+        );
+    } else {
+        throw new ForbiddenError(
+            `Enterprise license for ${lightdashConfig.siteUrl} ${license.detail} [${license.code}]`,
+        );
+    }
+
+    // Register EE-specific NATS streams
+    registerPreAggregateStream();
 
     return {
         serviceProviders: {
+            appGenerateService: ({ context }) =>
+                new AppGenerateService({
+                    lightdashConfig: context.lightdashConfig,
+                }),
             embedService: ({ repository, context, models }) =>
                 new EmbedService({
                     analytics: context.lightdashAnalytics,
@@ -261,6 +245,8 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                         repository.getAdminNotificationService(),
                     spacePermissionService:
                         repository.getSpacePermissionService(),
+                    contentVerificationModel:
+                        models.getContentVerificationModel(),
                 }),
             instanceConfigurationService: ({
                 models,
@@ -323,14 +309,10 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     encryptionUtil: utils.getEncryptionUtil(),
                     userModel: models.getUserModel(),
                     queryHistoryModel: models.getQueryHistoryModel(),
-                    preAggregateDailyStatsModel:
-                        models.getPreAggregateDailyStatsModel(),
                     downloadAuditModel: models.getDownloadAuditModel(),
                     cacheService: repository.getCacheService(),
                     savedSqlModel: models.getSavedSqlModel(),
                     resultsStorageClient: clients.getResultsFileStorageClient(),
-                    preAggregateResultsStorageClient:
-                        clients.getPreAggregateResultsFileStorageClient(),
                     featureFlagModel: models.getFeatureFlagModel(),
                     projectParametersModel: models.getProjectParametersModel(),
                     organizationWarehouseCredentialsModel:
@@ -340,11 +322,24 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     permissionsService: repository.getPermissionsService(),
                     persistentDownloadFileService:
                         repository.getPersistentDownloadFileService(),
-                    preAggregationDuckDbClient: new PreAggregationDuckDbClient({
-                        lightdashConfig: context.lightdashConfig,
-                        preAggregateModel: models.getPreAggregateModel(),
-                        projectModel: models.getProjectModel(),
-                        prometheusMetrics,
+                    preAggregateStrategy: new PreAggregateStrategy({
+                        preAggregationDuckDbClient:
+                            new PreAggregationDuckDbClient({
+                                lightdashConfig: context.lightdashConfig,
+                                preAggregateModel:
+                                    models.getPreAggregateModel(),
+                                projectModel: models.getProjectModel(),
+                                prometheusMetrics,
+                                memoryLimit:
+                                    context.lightdashConfig.preAggregates
+                                        .duckdbQueryMemoryLimit ?? undefined,
+                            }),
+                        preAggregateDailyStatsModel:
+                            models.getPreAggregateDailyStatsModel(),
+                        preAggregateResultsStorageClient:
+                            clients.getPreAggregateResultsFileStorageClient(),
+                        isEnabled: () =>
+                            context.lightdashConfig.preAggregates.enabled,
                     }),
                     projectCompileLogModel: models.getProjectCompileLogModel(),
                     adminNotificationService:
@@ -382,6 +377,26 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     slackClient: clients.getSlackClient(),
                     unfurlService: repository.getUnfurlService(),
                     aiAgentService: repository.getAiAgentService(),
+                }),
+            deployService: ({ models, clients, repository }) =>
+                new DeployService({
+                    deploySessionModel: models.getDeploySessionModel(),
+                    projectModel: models.getProjectModel(),
+                    projectService: repository.getProjectService(),
+                    schedulerClient: clients.getSchedulerClient(),
+                    exploreEnhancer: (explores) =>
+                        explores.flatMap((explore) => {
+                            if (isExploreError(explore)) return [explore];
+                            if (
+                                !explore.preAggregates ||
+                                explore.preAggregates.length === 0
+                            )
+                                return [explore];
+                            return generatePreAggregateExplores({
+                                compiledExplores: [explore],
+                                parsedPreAggregates: explore.preAggregates,
+                            });
+                        }),
                 }),
         },
         modelProviders: {

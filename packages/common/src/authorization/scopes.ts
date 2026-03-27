@@ -196,6 +196,13 @@ const scopes: Scope[] = [
         getConditions: addDefaultUuidCondition,
     },
     {
+        name: 'manage:ContentVerification',
+        description: 'Verify and unverify charts and dashboards',
+        isEnterprise: false,
+        group: ScopeGroup.CONTENT,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
         name: 'promote:SavedChart',
         description: 'Promote saved charts to any space',
         isEnterprise: false,
@@ -682,6 +689,15 @@ const scopes: Scope[] = [
         getConditions: (context) => [
             addUuidCondition(context, { userUuid: context.userUuid || false }),
         ],
+    },
+
+    // Data Apps
+    {
+        name: 'manage:DataApp',
+        description: 'Create and manage data apps',
+        isEnterprise: true,
+        group: ScopeGroup.AI,
+        getConditions: addDefaultUuidCondition,
     },
 
     // Spotlight Scopes

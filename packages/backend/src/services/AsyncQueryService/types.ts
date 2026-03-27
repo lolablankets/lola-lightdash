@@ -16,14 +16,17 @@ import {
     type ResultsPaginationArgs,
     type RunQueryTags,
     type SortField,
+    type UserAttributeValueMap,
 } from '@lightdash/common';
 
 export type CommonAsyncQueryArgs = {
     account: Account;
     projectUuid: string;
     invalidateCache?: boolean;
+    usePreAggregateCache?: boolean;
     context: QueryExecutionContext;
     parameters?: ParametersValuesMap;
+    userAttributeOverrides?: UserAttributeValueMap;
 };
 
 export type GetAsyncQueryResultsArgs = Omit<
@@ -152,6 +155,21 @@ export type ExecuteAsyncSqlChartArgs =
 export const isExecuteAsyncSqlChartByUuid = (
     args: ExecuteAsyncSqlChartArgs,
 ): args is ExecuteAsyncSqlChartByUuidArgs => 'savedSqlUuid' in args;
+
+export type PollingOptions = {
+    initialBackoffMs?: number;
+    maxBackoffMs?: number;
+    timeoutMs?: number;
+};
+
+/**
+ * Polling options tuned for scheduled/background tasks (e.g. GSheet syncs, email deliveries).
+ * Slower polling reduces DB round-trips through cloud-sql-proxy, preventing OOM under load.
+ */
+export const SCHEDULER_POLLING_OPTIONS: PollingOptions = {
+    initialBackoffMs: 2000,
+    maxBackoffMs: 5000,
+};
 
 export type RunAsyncWarehouseQueryArgs = {
     projectUuid: string;

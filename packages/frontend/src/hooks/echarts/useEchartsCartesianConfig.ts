@@ -8,6 +8,7 @@ import {
     CustomFormatType,
     DimensionType,
     evaluateConditionalFormatExpression,
+    FeatureFlags,
     formatItemValue,
     formatNumberValue,
     formatValueWithExpression,
@@ -89,6 +90,8 @@ import {
     defaultGrid,
     legendTopSpacing,
 } from '../../components/VisualizationConfigs/ChartConfigPanel/Grid/constants';
+import { sanitizeEchartsFontFamily } from '../../utils/sanitizeEchartsFontFamily';
+import { sliceRows } from '../../utils/sliceRows';
 import { EMPTY_X_AXIS } from '../cartesianChartConfig/useCartesianChartConfig';
 import {
     getPivotedDataFromPivotDetails,
@@ -96,6 +99,7 @@ import {
     type RowKeyMap,
 } from '../plottedData/getPlottedData';
 import { type InfiniteQueryResults } from '../useQueryResults';
+import { useServerFeatureFlag } from '../useServerOrClientFeatureFlag';
 import { useLegendDoubleClickTooltip } from './useLegendDoubleClickTooltip';
 
 // NOTE: CallbackDataParams type doesn't have axisValue, axisValueLabel properties: https://github.com/apache/echarts/issues/17561
@@ -1960,7 +1964,7 @@ const getEchartAxes = ({
                             hideOverlap: true,
                         },
                     }),
-                inverse: !!xAxisConfiguration?.[0].inverse,
+                inverse: !!xAxisConfiguration?.[0]?.inverse,
                 ...bottomAxisExtraConfig,
                 min: bottomAxisBounds.min,
                 max: maxXAxisValue,
@@ -2076,7 +2080,7 @@ const getEchartAxes = ({
                 axisTick: getAxisTickStyle(
                     validCartesianConfig?.eChartsConfig?.showAxisTicks,
                 ),
-                inverse: !!yAxisConfiguration?.[0].inverse,
+                inverse: !!yAxisConfiguration?.[0]?.inverse,
                 ...leftAxisExtraConfig,
             },
             {
@@ -2281,6 +2285,10 @@ const useEchartsCartesianConfig = (
     } = useVisualizationContext();
 
     const theme = useMantineTheme();
+    const { data: showHideRowsFlag } = useServerFeatureFlag(
+        FeatureFlags.ShowHideRows,
+    );
+    const isShowHideRowsEnabled = showHideRowsFlag?.enabled ?? false;
 
     const validCartesianConfig = useMemo(() => {
         if (!isCartesianVisualizationConfig(visualizationConfig)) return;
@@ -2330,7 +2338,7 @@ const useEchartsCartesianConfig = (
         );
     }, [resultsData?.pivotDetails]);
 
-    const { rows, rowKeyMap } = useMemo(() => {
+    const { rows: allRows, rowKeyMap } = useMemo(() => {
         if (resultsData?.pivotDetails) {
             return getPivotedDataFromPivotDetails(resultsData, undefined);
         }
@@ -2343,6 +2351,16 @@ const useEchartsCartesianConfig = (
             nonPivotedKeys,
         );
     }, [resultsData, pivotDimensions, pivotedKeys, nonPivotedKeys]);
+
+    const rows = useMemo(
+        () =>
+            sliceRows(
+                allRows,
+                isShowHideRowsEnabled,
+                validCartesianConfig?.rowLimit,
+            ),
+        [allRows, isShowHideRowsEnabled, validCartesianConfig?.rowLimit],
+    );
 
     const series = useMemo(() => {
         if (!itemsMap || !validCartesianConfig || !resultsData) {
@@ -2377,6 +2395,18 @@ const useEchartsCartesianConfig = (
         parameters,
     ]);
 
+    // Pivot references from hidden series, used for resolving custom tooltip references
+    // to fields that are on the Y axis but have their chart series hidden.
+    const hiddenSeriesPivotRefs = useMemo(() => {
+        const allConfigSeries =
+            validCartesianConfig?.eChartsConfig?.series ?? [];
+        return allConfigSeries
+            .filter(
+                (s) => s.hidden && isPivotReferenceWithValues(s.encode.yRef),
+            )
+            .map((s) => s.encode.yRef);
+    }, [validCartesianConfig?.eChartsConfig?.series]);
+
     const resultsAndMinsAndMaxes = useMemo(
         () => getResultValueArray(rows, true, true),
         [rows],
@@ -2408,9 +2438,12 @@ const useEchartsCartesianConfig = (
         if (!itemsMap) return;
 
         const isHorizontal = Boolean(validCartesianConfig?.layout.flipAxes);
-        const isColorByCategory = Boolean(
-            validCartesianConfig?.layout?.colorByCategory,
-        );
+        // Color by category only applies to ungrouped single-series charts;
+        // ignore the setting when pivot dimensions are active so that the
+        // saved overrides survive and restore when the grouping is removed.
+        const isColorByCategory =
+            Boolean(validCartesianConfig?.layout?.colorByCategory) &&
+            !pivotDimensions?.length;
         const categoryColorOverrides =
             validCartesianConfig?.layout?.categoryColorOverrides;
         // xField is always the dimension (category) field regardless of flipAxes.
@@ -2454,6 +2487,7 @@ const useEchartsCartesianConfig = (
                                 computedColor,
                             ),
                         },
+                        labelLayout: { hideOverlap: true },
                     }),
                     // Apply reference line styling with readable colors
                     ...(serie.markLine && {
@@ -2567,6 +2601,7 @@ const useEchartsCartesianConfig = (
         validCartesianConfig?.layout?.colorByCategory,
         validCartesianConfig?.layout?.categoryColorOverrides,
         validCartesianConfig?.layout?.xField,
+        pivotDimensions,
         series,
         rows,
         validCartesianConfigLegend,
@@ -2875,6 +2910,7 @@ const useEchartsCartesianConfig = (
                 xFieldId: validCartesianConfig?.layout?.xField,
                 originalValues,
                 series,
+                hiddenSeriesPivotRefs,
                 tooltipHtmlTemplate: tooltipConfig,
                 tooltipSort: tooltipSortConfig,
                 pivotValuesColumnsMap,
@@ -2893,6 +2929,7 @@ const useEchartsCartesianConfig = (
         originalValues,
         parameters,
         series,
+        hiddenSeriesPivotRefs,
         dataToRender,
         isTouchDevice,
     ]);
@@ -3179,7 +3216,9 @@ const useEchartsCartesianConfig = (
             tooltip,
             grid: currentGrid,
             textStyle: {
-                fontFamily: theme?.other.chartFont as string | undefined,
+                fontFamily: sanitizeEchartsFontFamily(
+                    theme?.other.chartFont as string | undefined,
+                ),
             },
             // We assign colors per series, so we specify an empty list here.
             color: [],

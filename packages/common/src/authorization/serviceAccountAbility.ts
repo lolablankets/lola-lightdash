@@ -270,6 +270,9 @@ const applyServiceAccountStaticAbilities: Record<
         can('manage', 'ContentAsCode', {
             organizationUuid,
         });
+        can('manage', 'ContentVerification', {
+            organizationUuid,
+        });
         can('view', 'JobStatus', {
             organizationUuid,
         });
@@ -279,6 +282,9 @@ const applyServiceAccountStaticAbilities: Record<
         can('manage', 'AiAgentThread', {
             organizationUuid,
             //  userUuid: userUuid,
+        });
+        can('manage', 'DataApp', {
+            organizationUuid,
         });
         can('manage', 'Dashboard', {
             organizationUuid,

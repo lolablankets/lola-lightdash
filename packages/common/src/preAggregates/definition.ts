@@ -1,6 +1,6 @@
-import { type DbtPreAggregateDef } from '../types/dbt';
+import type { DbtPreAggregateDef } from '../types/dbt';
 import { ParseError } from '../types/errors';
-import { type PreAggregateDef } from '../types/preAggregate';
+import type { PreAggregateDef } from '../types/preAggregate';
 import { TimeFrames } from '../types/timeFrames';
 
 const PRE_AGGREGATE_NAME_PATTERN = /^[a-zA-Z0-9_]+$/;
@@ -101,12 +101,23 @@ export const parseDbtPreAggregateDef = (
         );
     }
 
+    const maxRows =
+        typeof safePreAggregate?.max_rows === 'number'
+            ? safePreAggregate.max_rows
+            : undefined;
+    if (maxRows !== undefined && (!Number.isInteger(maxRows) || maxRows <= 0)) {
+        throw new ParseError(
+            `Pre-aggregate "${name}" in model "${modelName}" has invalid "max_rows". Must be a positive integer.`,
+        );
+    }
+
     return {
         name,
         dimensions,
         metrics,
         ...(timeDimension ? { timeDimension } : {}),
         ...(granularity ? { granularity } : {}),
+        ...(maxRows !== undefined ? { maxRows } : {}),
         ...(safePreAggregate.refresh?.cron
             ? { refresh: { cron: safePreAggregate.refresh.cron } }
             : {}),

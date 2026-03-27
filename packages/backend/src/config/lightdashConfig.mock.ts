@@ -234,7 +234,7 @@ export const lightdashConfigMock: LightdashConfig = {
             providers: {
                 openai: {
                     apiKey: 'mock_api_key',
-                    modelName: 'gpt-5.2-2025-12-11',
+                    modelName: 'gpt-5.4',
                     embeddingModelName: 'text-embedding-3-small',
                     zeroDataRetention: false,
                 },
@@ -349,6 +349,8 @@ export const lightdashConfigMock: LightdashConfig = {
     preAggregates: {
         enabled: false,
         parquetEnabled: false,
+        materializationMaxRows: null,
+        duckdbQueryMemoryLimit: null,
         s3: {
             endpoint: 'mock_endpoint',
             bucket: 'mock_preagg_bucket',
@@ -357,5 +359,16 @@ export const lightdashConfigMock: LightdashConfig = {
     },
     userImpersonation: {
         enabled: undefined,
+    },
+    changeChartExplore: {
+        enabled: undefined,
+    },
+    appRuntime: {
+        enabled: false,
+        lightdashOrigin: 'https://test.lightdash.cloud',
+        cdnOrigin: null,
+        previewOrigin: null,
+        s3: null,
+        e2bApiKey: null,
     },
 };

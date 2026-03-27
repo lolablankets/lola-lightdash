@@ -9,12 +9,12 @@ import {
 import { InvalidArgumentError, Option, program } from 'commander';
 import { validate } from 'uuid';
 import {
-    CLI_VERSION,
     DEFAULT_DBT_PROFILES_DIR as defaultProfilesDir,
     DEFAULT_DBT_PROJECT_DIR as defaultProjectDir,
     NODE_VERSION,
     OPTIMIZED_NODE_VERSION,
 } from './env';
+import { getDiagnosticsHint } from './error';
 import GlobalState from './globalState';
 import { compileHandler } from './handlers/compile';
 import { refreshHandler } from './handlers/dbt/refresh';
@@ -26,7 +26,10 @@ import { exportChartImageHandler } from './handlers/exportChartImage';
 import { generateHandler } from './handlers/generate';
 import { generateExposuresHandler } from './handlers/generateExposures';
 import { getProjectHandler } from './handlers/getProject';
-import { installSkillsHandler } from './handlers/installSkills';
+import {
+    getVersionWithSkills,
+    installSkillsHandler,
+} from './handlers/installSkills';
 import { lintHandler } from './handlers/lint';
 import { listProjectsHandler } from './handlers/listProjects';
 import { login } from './handlers/login';
@@ -37,7 +40,8 @@ import {
 } from './handlers/preview';
 import { renameHandler } from './handlers/renameHandler';
 import { runChartHandler } from './handlers/runChart';
-import { setProjectHandler } from './handlers/setProject';
+import { setProjectHandler, unsetProjectHandler } from './handlers/setProject';
+import { setWarehouseHandler } from './handlers/setWarehouse';
 import { sqlHandler } from './handlers/sql';
 import { validateHandler } from './handlers/validate';
 import * as styles from './styles';
@@ -94,7 +98,7 @@ function parseProjectArgument(value: string | undefined): string | undefined {
 }
 
 program
-    .version(CLI_VERSION)
+    .version(getVersionWithSkills())
     .name(styles.title('⚡️lightdash'))
     .description(
         'Developer tools for dbt and Lightdash.\nSee https://docs.lightdash.com for more help and examples',
@@ -217,11 +221,13 @@ ${styles.bold('Examples:')}
 `,
     )
     .option('--token <token>', 'Login with an API access token', undefined)
-    .option(
-        '--project <project uuid>',
-        'Select a project by UUID after login',
-        parseProjectArgument,
-        undefined,
+    .addOption(
+        new Option(
+            '--project <project uuid>',
+            'Select a project by UUID after login',
+        )
+            .argParser(parseProjectArgument)
+            .conflicts('skipProjectSelection'),
     )
     .option('--email <email>', 'Login with email and password', undefined)
     .option(
@@ -274,6 +280,11 @@ configProgram
     .description('Show the currently selected project')
     .option('--verbose', undefined, false)
     .action(getProjectHandler);
+configProgram
+    .command('unset-project')
+    .description('Clear the currently selected project')
+    .option('--verbose', undefined, false)
+    .action(unsetProjectHandler);
 
 const dbtProgram = program.command('dbt').description('Runs dbt commands');
 
@@ -724,6 +735,11 @@ program
         parseProjectArgument,
         undefined,
     )
+    .option(
+        '--skip-spaces',
+        'skip writing space metadata files during download',
+        false,
+    )
     .action(downloadHandler);
 
 program
@@ -773,6 +789,7 @@ program
         false,
     )
     .option('--validate', 'Validate charts and dashboards after upload', false)
+    .option('--gzip', 'Enable gzip compression for request bodies', false)
     .action(uploadHandler);
 
 program
@@ -888,6 +905,7 @@ program
         'Number of batches to send in parallel (default: 1, use higher values with caution)',
         '1',
     )
+    .option('--gzip', 'Enable gzip compression for request bodies', false)
     .action(deployHandler);
 
 program
@@ -1235,6 +1253,46 @@ program
     .action(runChartHandler);
 
 program
+    .command('set-warehouse')
+    .description(
+        "Update a project's warehouse connection from dbt profiles.yml. Use --assume-yes for non-interactive/CI usage. For organization-managed credentials, use the Lightdash UI.",
+    )
+    .option(
+        '--project-dir <path>',
+        'The directory of the dbt project',
+        defaultProjectDir,
+    )
+    .option(
+        '--profiles-dir <path>',
+        'The directory of the dbt profiles',
+        defaultProfilesDir,
+    )
+    .option(
+        '--profile <name>',
+        'The name of the profile to use (defaults to profile name in dbt_project.yml)',
+        undefined,
+    )
+    .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
+    .option(
+        '--project <uuid>',
+        'Lightdash project UUID to update (defaults to currently selected project)',
+        undefined,
+    )
+    .option(
+        '--start-of-week <number>',
+        'Specifies the first day of the week (used by week-related date functions). 0 (Monday) to 6 (Sunday)',
+        parseStartOfWeekArgument,
+    )
+    .option('-y, --assume-yes', 'assume yes to prompts', false)
+    .option('--verbose', 'Show detailed output', false)
+    .action(setWarehouseHandler);
+
+program
     .command('export-chart-image')
     .description(
         'Export a deployed chart as a PNG image. The chart must already exist on the server.',
@@ -1274,6 +1332,11 @@ ${styles.bold('Examples:')}
   )} --path ./my-project ${styles.secondary(
       '-- installs skills to a specific path',
   )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+      'install-skills',
+  )} --source my-org/lightdash-fork ${styles.secondary(
+      '-- installs skills from a custom GitHub repo',
+  )}
 
 ${styles.bold('Installation paths:')}
   ${styles.secondary('Project-level (default):')}
@@ -1301,6 +1364,11 @@ ${styles.bold('Installation paths:')}
     .option(
         '--path <path>',
         'Override the install path (skills directory will be created inside)',
+        undefined,
+    )
+    .option(
+        '--source <org/repo>',
+        'Override the GitHub repository to download skills from (default: lightdash/lightdash)',
         undefined,
     )
     .action(installSkillsHandler);
@@ -1342,6 +1410,10 @@ const errorHandler = (err: Error) => {
                 `\n You must have dbt installed to use this command. See https://docs.getdbt.com/docs/core/installation for installation instructions`,
             ),
         );
+    }
+    const diagnosticsHint = getDiagnosticsHint();
+    if (diagnosticsHint) {
+        console.error(diagnosticsHint);
     }
     if (NODE_VERSION.major !== OPTIMIZED_NODE_VERSION) {
         console.warn(

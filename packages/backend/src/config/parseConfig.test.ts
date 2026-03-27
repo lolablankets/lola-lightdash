@@ -1,10 +1,12 @@
 import {
     ALL_TASK_NAMES,
+    DbtProjectType,
     LightdashMode,
     OrganizationMemberRole,
     ParameterError,
     ParseError,
     SentryConfig,
+    WarehouseTypes,
 } from '@lightdash/common';
 import { VERSION } from '../version';
 import {
@@ -12,6 +14,7 @@ import {
     getFloatFromEnvironmentVariable,
     getIntegerFromEnvironmentVariable,
     getMaybeBase64EncodedFromEnvironmentVariable,
+    getMultiProjectSetupConfig,
     getObjectFromEnvironmentVariable,
     parseConfig,
     parseOrganizationMemberRoleArray,
@@ -117,6 +120,45 @@ test('Should use explicit pre-aggregate S3 credentials when set', () => {
         secretKey: 'preagg_secret_key',
         forcePathStyle: false,
     });
+});
+
+test('Should default apps S3 config to base S3 config', () => {
+    process.env.S3_ACCESS_KEY = 'mock_access_key';
+    process.env.S3_SECRET_KEY = 'mock_secret_key';
+    const config = parseConfig();
+    expect(config.appRuntime.s3).toEqual({
+        endpoint: 'mock_endpoint',
+        bucket: 'mock_bucket',
+        region: 'mock_region',
+        accessKey: 'mock_access_key',
+        secretKey: 'mock_secret_key',
+        forcePathStyle: false,
+    });
+});
+
+test('Should use explicit apps S3 config when set', () => {
+    process.env.APPS_S3_BUCKET = 'apps_bucket';
+    process.env.APPS_S3_REGION = 'apps_region';
+    process.env.APPS_S3_ACCESS_KEY = 'apps_access_key';
+    process.env.APPS_S3_SECRET_KEY = 'apps_secret_key';
+    const config = parseConfig();
+    expect(config.appRuntime.s3).toEqual({
+        endpoint: 'mock_endpoint',
+        bucket: 'apps_bucket',
+        region: 'apps_region',
+        accessKey: 'apps_access_key',
+        secretKey: 'apps_secret_key',
+        forcePathStyle: false,
+    });
+});
+
+test('Should return null apps S3 config when base S3 is not configured', () => {
+    delete process.env.S3_ENDPOINT;
+    delete process.env.S3_BUCKET;
+    delete process.env.S3_REGION;
+    process.env.APPS_S3_BUCKET = 'apps_bucket';
+    const config = parseConfig();
+    expect(config.appRuntime.s3).toBeNull();
 });
 
 test('Should parse rudder config from env', () => {
@@ -447,7 +489,9 @@ describe('process.env.LIGHTDASH_IFRAME_EMBEDDING_DOMAINS', () => {
         test('should parse personal access token', () => {
             process.env.LD_SETUP_PROJECT_PAT = 'project_personal_access_token';
             const config = parseConfig();
-            expect(config.initialSetup?.project?.personalAccessToken).toBe(
+            const warehouseConnection = config.initialSetup?.projects[0]
+                ?.warehouseConnection as { personalAccessToken?: string };
+            expect(warehouseConnection?.personalAccessToken).toBe(
                 'project_personal_access_token',
             );
         });
@@ -639,4 +683,147 @@ test('should set groups.enabled only when the environment variable is set', () =
     process.env.GROUPS_ENABLED = 'false';
     const falseConfig = parseConfig();
     expect(falseConfig.groups.enabled).toBe(false);
+});
+
+describe('getMultiProjectSetupConfig', () => {
+    beforeEach(() => {
+        delete process.env.LD_SETUP_PROJECTS;
+    });
+
+    test('should return undefined when LD_SETUP_PROJECTS is not set', () => {
+        expect(getMultiProjectSetupConfig()).toBeUndefined();
+    });
+
+    test('should return undefined for empty array', () => {
+        process.env.LD_SETUP_PROJECTS = '[]';
+        expect(getMultiProjectSetupConfig()).toBeUndefined();
+    });
+
+    test('should parse valid multi-project config', () => {
+        const projects = [
+            {
+                name: 'Project Alpha',
+                warehouseConnection: {
+                    type: WarehouseTypes.DATABRICKS,
+                    serverHostName: 'alpha.databricks.com',
+                    httpPath: '/sql/1.0/warehouses/alpha',
+                    database: 'alpha_db',
+                    personalAccessToken: 'alpha-token',
+                },
+                dbtConnection: {
+                    type: DbtProjectType.GITHUB,
+                    authorization_method: 'personal_access_token',
+                    personal_access_token: 'alpha-dbt-token',
+                    repository: 'org/alpha-repo',
+                    branch: 'main',
+                    project_sub_path: '/',
+                },
+            },
+        ];
+        process.env.LD_SETUP_PROJECTS = JSON.stringify(projects);
+        const result = getMultiProjectSetupConfig();
+        expect(result).toEqual(projects);
+    });
+
+    test('should throw ParseError for non-array JSON', () => {
+        process.env.LD_SETUP_PROJECTS = '{"name": "not an array"}';
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Invalid LD_SETUP_PROJECTS',
+        );
+    });
+
+    test('should throw ParseError for entry without name', () => {
+        process.env.LD_SETUP_PROJECTS = JSON.stringify([
+            {
+                warehouseConnection: { type: 'databricks' },
+                dbtConnection: { type: 'github' },
+            },
+        ]);
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Invalid LD_SETUP_PROJECTS',
+        );
+    });
+
+    test('should throw ParseError for entry without warehouseConnection', () => {
+        process.env.LD_SETUP_PROJECTS = JSON.stringify([
+            {
+                name: 'Test',
+                dbtConnection: { type: 'github' },
+            },
+        ]);
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Invalid LD_SETUP_PROJECTS',
+        );
+    });
+
+    test('should throw ParseError for entry without dbtConnection', () => {
+        process.env.LD_SETUP_PROJECTS = JSON.stringify([
+            {
+                name: 'Test',
+                warehouseConnection: { type: 'databricks' },
+            },
+        ]);
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Invalid LD_SETUP_PROJECTS',
+        );
+    });
+
+    test('should throw ParseError for invalid warehouse type', () => {
+        process.env.LD_SETUP_PROJECTS = JSON.stringify([
+            {
+                name: 'Test',
+                warehouseConnection: { type: 'banana' },
+                dbtConnection: { type: 'github' },
+            },
+        ]);
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Invalid warehouse type',
+        );
+    });
+
+    test('should throw ParseError for invalid dbt connection type', () => {
+        process.env.LD_SETUP_PROJECTS = JSON.stringify([
+            {
+                name: 'Test',
+                warehouseConnection: { type: 'databricks' },
+                dbtConnection: { type: 'invalid' },
+            },
+        ]);
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Invalid dbt connection type',
+        );
+    });
+
+    test('should throw ParseError for duplicate project names', () => {
+        process.env.LD_SETUP_PROJECTS = JSON.stringify([
+            {
+                name: 'Duplicate',
+                warehouseConnection: { type: 'databricks' },
+                dbtConnection: { type: 'github' },
+            },
+            {
+                name: 'Duplicate',
+                warehouseConnection: { type: 'databricks' },
+                dbtConnection: { type: 'github' },
+            },
+        ]);
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Duplicate project name "Duplicate"',
+        );
+    });
+
+    test('should throw ParseError for invalid JSON', () => {
+        process.env.LD_SETUP_PROJECTS = 'not valid json';
+        expect(() => getMultiProjectSetupConfig()).toThrow(ParseError);
+        expect(() => getMultiProjectSetupConfig()).toThrow(
+            'Failed to parse LD_SETUP_PROJECTS',
+        );
+    });
 });

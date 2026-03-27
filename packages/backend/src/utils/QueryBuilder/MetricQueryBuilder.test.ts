@@ -20,6 +20,7 @@ import {
 import {
     BuildQueryProps,
     CompiledQuery,
+    getIntervalSyntax,
     MetricQueryBuilder,
 } from './MetricQueryBuilder';
 import {
@@ -133,6 +134,107 @@ const POP_TEST_POP_METRIC_NAME = 'total_order_amount__pop__year_1__testpop';
 const POP_TEST_POP_METRIC_ID = `orders_${POP_TEST_POP_METRIC_NAME}`;
 const POP_TEST_FANOUT_POP_METRIC_NAME = 'metric_amount__pop__year_1__fanout';
 const POP_TEST_FANOUT_POP_METRIC_ID = `table2_${POP_TEST_FANOUT_POP_METRIC_NAME}`;
+const POP_TEST_COUNTRY_FANOUT_POP_METRIC_NAME =
+    'total_order_amount__pop__year_1__country';
+const POP_TEST_COUNTRY_FANOUT_POP_METRIC_ID = `country_orders_${POP_TEST_COUNTRY_FANOUT_POP_METRIC_NAME}`;
+const EXPLORE_WITH_NESTED_AGG_AND_FANOUT: Explore = {
+    ...EXPLORE_WITH_NESTED_AGG,
+    joinedTables: [
+        {
+            table: 'fanout_users',
+            sqlOn: '${my_table.id} = ${fanout_users.account_id}',
+            compiledSqlOn: '("my_table".id) = ("fanout_users".account_id)',
+            type: 'left',
+            relationship: JoinRelationship.ONE_TO_MANY,
+            tablesReferences: ['my_table', 'fanout_users'],
+        },
+    ],
+    tables: {
+        ...EXPLORE_WITH_NESTED_AGG.tables,
+        my_table: {
+            ...EXPLORE_WITH_NESTED_AGG.tables.my_table,
+            metrics: {
+                ...EXPLORE_WITH_NESTED_AGG.tables.my_table.metrics,
+                cross_table_sum_of_max: {
+                    type: MetricType.NUMBER,
+                    fieldType: FieldType.METRIC,
+                    table: 'my_table',
+                    tableLabel: 'my_table',
+                    name: 'cross_table_sum_of_max',
+                    label: 'cross_table_sum_of_max',
+                    sql: 'sum(${max_value}) / NULLIF(${fanout_users.count_users}, 0)',
+                    compiledSql:
+                        'SUM(MAX("my_table".value)) / NULLIF(COUNT("fanout_users".id), 0)',
+                    tablesReferences: ['my_table', 'fanout_users'],
+                    hidden: false,
+                },
+            },
+        },
+        fanout_users: {
+            name: 'fanout_users',
+            label: 'fanout_users',
+            database: 'db',
+            schema: 'schema',
+            sqlTable: '"db"."schema"."fanout_users"',
+            primaryKey: ['id'],
+            dimensions: {
+                title: {
+                    type: DimensionType.STRING,
+                    name: 'title',
+                    label: 'title',
+                    table: 'fanout_users',
+                    tableLabel: 'fanout_users',
+                    fieldType: FieldType.DIMENSION,
+                    sql: '${TABLE}.title',
+                    compiledSql: '"fanout_users".title',
+                    tablesReferences: ['fanout_users'],
+                    hidden: false,
+                },
+            },
+            metrics: {
+                count_users: {
+                    type: MetricType.COUNT,
+                    fieldType: FieldType.METRIC,
+                    table: 'fanout_users',
+                    tableLabel: 'fanout_users',
+                    name: 'count_users',
+                    label: 'count_users',
+                    sql: '${TABLE}.id',
+                    compiledSql: 'COUNT("fanout_users".id)',
+                    tablesReferences: ['fanout_users'],
+                    hidden: false,
+                },
+            },
+            lineageGraph: {},
+        },
+    },
+};
+
+const METRIC_QUERY_NESTED_AGG_WITH_FANOUT: CompiledMetricQuery = {
+    exploreName: 'my_table',
+    dimensions: ['fanout_users_title'],
+    metrics: ['my_table_sum_of_max', 'my_table_count_records'],
+    filters: {},
+    sorts: [{ fieldId: 'my_table_sum_of_max', descending: true }],
+    limit: 10,
+    tableCalculations: [],
+    compiledTableCalculations: [],
+    compiledAdditionalMetrics: [],
+    compiledCustomDimensions: [],
+};
+
+const METRIC_QUERY_NESTED_AGG_WITH_FANOUT_CROSS_TABLE: CompiledMetricQuery = {
+    exploreName: 'my_table',
+    dimensions: ['fanout_users_title'],
+    metrics: ['my_table_cross_table_sum_of_max', 'my_table_count_records'],
+    filters: {},
+    sorts: [{ fieldId: 'my_table_cross_table_sum_of_max', descending: true }],
+    limit: 10,
+    tableCalculations: [],
+    compiledTableCalculations: [],
+    compiledAdditionalMetrics: [],
+    compiledCustomDimensions: [],
+};
 
 const POP_TEST_EXPLORE: Explore = {
     targetDatabase: SupportedDbtAdapter.POSTGRES,
@@ -487,6 +589,233 @@ const POP_TEST_FANOUT_METRIC_QUERY: CompiledMetricQuery = {
     compiledCustomDimensions: [],
 };
 
+/**
+ * country_orders → order_currencies fanout explore.
+ * country_orders is the base table (one row per order per country).
+ * order_currencies is joined one-to-many (multiple currencies per order).
+ * PoP metric lives on order_currencies, triggering fanout-protected CTE path.
+ */
+const POP_TEST_COUNTRY_FANOUT_EXPLORE: Explore = {
+    targetDatabase: SupportedDbtAdapter.POSTGRES,
+    name: 'country_orders',
+    label: 'country_orders',
+    baseTable: 'country_orders',
+    tags: [],
+    joinedTables: [
+        {
+            table: 'order_currencies',
+            sqlOn: '${country_orders.order_id} = ${order_currencies.order_id}',
+            compiledSqlOn:
+                '("country_orders".order_id) = ("order_currencies".order_id)',
+            type: 'left',
+            relationship: JoinRelationship.ONE_TO_MANY,
+            tablesReferences: ['country_orders', 'order_currencies'],
+        },
+    ],
+    tables: {
+        country_orders: {
+            name: 'country_orders',
+            label: 'country_orders',
+            database: 'postgres',
+            schema: 'jaffle',
+            sqlTable: '"postgres"."jaffle"."country_orders"',
+            primaryKey: ['order_id'],
+            dimensions: {
+                order_id: {
+                    type: DimensionType.NUMBER,
+                    name: 'order_id',
+                    label: 'order_id',
+                    table: 'country_orders',
+                    tableLabel: 'country_orders',
+                    fieldType: FieldType.DIMENSION,
+                    sql: '${TABLE}.order_id',
+                    compiledSql: '"country_orders".order_id',
+                    tablesReferences: ['country_orders'],
+                    hidden: false,
+                },
+                order_date: {
+                    type: DimensionType.DATE,
+                    name: 'order_date',
+                    label: 'order_date',
+                    table: 'country_orders',
+                    tableLabel: 'country_orders',
+                    fieldType: FieldType.DIMENSION,
+                    sql: '${TABLE}.order_date',
+                    compiledSql: '"country_orders".order_date',
+                    tablesReferences: ['country_orders'],
+                    hidden: false,
+                },
+                order_date_year: {
+                    type: DimensionType.DATE,
+                    name: 'order_date_year',
+                    label: 'order_date_year',
+                    table: 'country_orders',
+                    tableLabel: 'country_orders',
+                    fieldType: FieldType.DIMENSION,
+                    sql: "DATE_TRUNC('YEAR', ${TABLE}.order_date)",
+                    compiledSql: `DATE_TRUNC('YEAR', "country_orders".order_date)`,
+                    tablesReferences: ['country_orders'],
+                    hidden: false,
+                    timeInterval: TimeFrames.YEAR,
+                    timeIntervalBaseDimensionName: 'order_date',
+                },
+                country: {
+                    type: DimensionType.STRING,
+                    name: 'country',
+                    label: 'country',
+                    table: 'country_orders',
+                    tableLabel: 'country_orders',
+                    fieldType: FieldType.DIMENSION,
+                    sql: '${TABLE}.country',
+                    compiledSql: '"country_orders".country',
+                    tablesReferences: ['country_orders'],
+                    hidden: false,
+                },
+            },
+            metrics: {
+                total_order_amount: {
+                    type: MetricType.SUM,
+                    fieldType: FieldType.METRIC,
+                    table: 'country_orders',
+                    tableLabel: 'country_orders',
+                    name: 'total_order_amount',
+                    label: 'total_order_amount',
+                    sql: '${TABLE}.amount',
+                    compiledSql: 'SUM("country_orders".amount)',
+                    tablesReferences: ['country_orders'],
+                    hidden: false,
+                },
+            },
+            lineageGraph: {},
+        },
+        order_currencies: {
+            name: 'order_currencies',
+            label: 'order_currencies',
+            database: 'postgres',
+            schema: 'jaffle',
+            sqlTable: '"postgres"."jaffle"."order_currencies"',
+            primaryKey: ['order_id'],
+            dimensions: {
+                order_id: {
+                    type: DimensionType.NUMBER,
+                    name: 'order_id',
+                    label: 'order_id',
+                    table: 'order_currencies',
+                    tableLabel: 'order_currencies',
+                    fieldType: FieldType.DIMENSION,
+                    sql: '${TABLE}.order_id',
+                    compiledSql: '"order_currencies".order_id',
+                    tablesReferences: ['order_currencies'],
+                    hidden: false,
+                },
+                currency: {
+                    type: DimensionType.STRING,
+                    name: 'currency',
+                    label: 'currency',
+                    table: 'order_currencies',
+                    tableLabel: 'order_currencies',
+                    fieldType: FieldType.DIMENSION,
+                    sql: '${TABLE}.currency',
+                    compiledSql: '"order_currencies".currency',
+                    tablesReferences: ['order_currencies'],
+                    hidden: false,
+                },
+            },
+            metrics: {
+                total_converted_amount: {
+                    type: MetricType.SUM,
+                    fieldType: FieldType.METRIC,
+                    table: 'order_currencies',
+                    tableLabel: 'order_currencies',
+                    name: 'total_converted_amount',
+                    label: 'total_converted_amount',
+                    sql: '${TABLE}.converted_amount',
+                    compiledSql: 'SUM("order_currencies".converted_amount)',
+                    tablesReferences: ['order_currencies'],
+                    hidden: false,
+                },
+            },
+            lineageGraph: {},
+        },
+    },
+};
+
+const POP_TEST_COUNTRY_FANOUT_METRIC_QUERY: CompiledMetricQuery = {
+    exploreName: 'country_orders',
+    dimensions: [
+        'country_orders_order_date_year',
+        'country_orders_country',
+        'order_currencies_currency',
+    ],
+    metrics: [
+        'country_orders_total_order_amount',
+        POP_TEST_COUNTRY_FANOUT_POP_METRIC_ID,
+    ],
+    filters: {},
+    sorts: [{ fieldId: 'country_orders_order_date_year', descending: true }],
+    limit: 100,
+    tableCalculations: [],
+    compiledTableCalculations: [],
+    additionalMetrics: [
+        {
+            table: 'country_orders',
+            name: POP_TEST_COUNTRY_FANOUT_POP_METRIC_NAME,
+            label: 'Previous year total_order_amount',
+            type: MetricType.SUM,
+            sql: '${TABLE}.amount',
+            generationType: 'periodOverPeriod' as const,
+            baseMetricId: 'country_orders_total_order_amount',
+            timeDimensionId: 'country_orders_order_date_year',
+            granularity: TimeFrames.YEAR,
+            periodOffset: 1,
+        },
+    ],
+    compiledAdditionalMetrics: [
+        {
+            type: MetricType.SUM,
+            fieldType: FieldType.METRIC,
+            table: 'country_orders',
+            tableLabel: 'country_orders',
+            name: POP_TEST_COUNTRY_FANOUT_POP_METRIC_NAME,
+            label: 'Previous year total_order_amount',
+            sql: '${TABLE}.amount',
+            compiledSql: 'SUM("country_orders".amount)',
+            tablesReferences: ['country_orders'],
+            hidden: true,
+        },
+    ],
+    compiledCustomDimensions: [],
+};
+describe('getIntervalSyntax', () => {
+    test('Should use DATEADD for Redshift month granularity', () => {
+        expect(
+            getIntervalSyntax(
+                SupportedDbtAdapter.REDSHIFT,
+                '"orders".order_date',
+                'pop.min_date',
+                '>=',
+                1,
+                'month',
+                false,
+            ),
+        ).toBe('"orders".order_date >= DATEADD(month, -1, pop.min_date)');
+    });
+
+    test('Should convert Redshift quarter granularity to months in DATEADD', () => {
+        expect(
+            getIntervalSyntax(
+                SupportedDbtAdapter.REDSHIFT,
+                '"orders".order_date',
+                'pop.max_date',
+                '<=',
+                1,
+                'quarter',
+                false,
+            ),
+        ).toBe('"orders".order_date <= DATEADD(MONTH, -3, pop.max_date)');
+    });
+});
+
 describe('Query builder', () => {
     test('Should build simple metric query', () => {
         expect(
@@ -660,6 +989,8 @@ describe('Query builder', () => {
         expect(query).toMatch(
             /DATE_TRUNC\('YEAR', "orders"\.order_date\) <= pop_min_max_[a-z0-9_]+\.max_date - INTERVAL '1 YEAR'/,
         );
+        // PoP CTE should always use LEFT JOIN to preserve base rows
+        expect(query).toMatch(/LEFT JOIN pop_metrics_/);
     });
 
     test('Should not carry date filter into PoP CTE when only date filters exist', () => {
@@ -701,6 +1032,25 @@ describe('Query builder', () => {
         );
     });
 
+    test('Should use LEFT JOIN for PoP CTE so all base rows are returned when no filters are applied', () => {
+        const metricQueryWithNoFilters: CompiledMetricQuery = {
+            ...POP_TEST_METRIC_QUERY,
+            filters: {},
+        };
+
+        const { query } = buildQuery({
+            explore: POP_TEST_EXPLORE,
+            compiledMetricQuery: metricQueryWithNoFilters,
+            warehouseSqlBuilder: warehouseClientMock,
+            intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+            timezone: QUERY_BUILDER_UTC_TIMEZONE,
+        });
+
+        // Should use LEFT JOIN, not INNER JOIN, so base rows aren't dropped
+        expect(query).toMatch(/LEFT JOIN pop_metrics_/);
+        expect(query).not.toMatch(/INNER JOIN pop_metrics_/);
+    });
+
     test('Should reuse non-time filters for PoP metrics in fanout-protected CTEs while shifting the comparison period', () => {
         const { query } = buildQuery({
             explore: POP_TEST_FANOUT_EXPLORE,
@@ -722,6 +1072,43 @@ describe('Query builder', () => {
         expect(query).toMatch(
             /DATE_TRUNC\('YEAR', "table2"\.order_date\) <= cte_pop_min_max_[a-z0-9_]+__year_1__[a-z0-9_]+\.max_date - INTERVAL '1 YEAR'/,
         );
+    });
+
+    test('Should use LEFT JOIN for PoP CTE in fanout-protected path so all base rows are returned', () => {
+        const metricQueryWithNoFilters: CompiledMetricQuery = {
+            ...POP_TEST_FANOUT_METRIC_QUERY,
+            filters: {},
+        };
+
+        const { query } = buildQuery({
+            explore: POP_TEST_FANOUT_EXPLORE,
+            compiledMetricQuery: metricQueryWithNoFilters,
+            warehouseSqlBuilder: warehouseClientMock,
+            intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+            timezone: QUERY_BUILDER_UTC_TIMEZONE,
+        });
+
+        // Fanout-protected PoP CTE should use LEFT JOIN, not INNER JOIN
+        expect(query).toContain('cte_pop_metrics_');
+        expect(query).toMatch(/LEFT JOIN cte_pop_metrics_/);
+        expect(query).not.toMatch(/INNER JOIN cte_pop_metrics_/);
+    });
+
+    test('Should use LEFT JOIN for PoP CTE in country_orders → order_currencies fanout so all base rows are returned', () => {
+        const { query } = buildQuery({
+            explore: POP_TEST_COUNTRY_FANOUT_EXPLORE,
+            compiledMetricQuery: POP_TEST_COUNTRY_FANOUT_METRIC_QUERY,
+            warehouseSqlBuilder: warehouseClientMock,
+            intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+            timezone: QUERY_BUILDER_UTC_TIMEZONE,
+        });
+
+        // Should trigger fanout-protected CTE path since order_currencies is one-to-many
+        expect(query).toContain('cte_pop_metrics_');
+        // PoP CTE must use LEFT JOIN to preserve all base rows (e.g. countries
+        // that exist in the current period but not the comparison period)
+        expect(query).toMatch(/LEFT JOIN cte_pop_metrics_/);
+        expect(query).not.toMatch(/INNER JOIN cte_pop_metrics_/);
     });
 
     test('Should build query with nested filter operators', () => {
@@ -1161,6 +1548,86 @@ describe('Query builder', () => {
             ),
         ).toStrictEqual(
             replaceWhitespace(METRIC_QUERY_WITH_REQUIRED_FILTERS_SQL),
+        );
+    });
+
+    it('Should not let string-derived time filters satisfy required date filters', () => {
+        const exploreWithStringDerivedTimeDimension: Explore = {
+            ...EXPLORE_WITH_DATE_DIMENSION,
+            tables: {
+                ...EXPLORE_WITH_DATE_DIMENSION.tables,
+                orders: {
+                    ...EXPLORE_WITH_DATE_DIMENSION.tables.orders,
+                    requiredFilters: [
+                        {
+                            id: 'required-created-at',
+                            target: {
+                                fieldRef: 'created_at',
+                            },
+                            operator: FilterOperator.IN_BETWEEN,
+                            values: ['2024-09-01', '2024-09-04'],
+                            required: true,
+                        },
+                    ],
+                    dimensions: {
+                        ...EXPLORE_WITH_DATE_DIMENSION.tables.orders.dimensions,
+                        created_at: {
+                            ...EXPLORE_WITH_DATE_DIMENSION.tables.orders
+                                .dimensions.created_at,
+                            isIntervalBase: true,
+                        },
+                        created_at_fiscal_quarter: {
+                            type: DimensionType.STRING,
+                            name: 'created_at_fiscal_quarter',
+                            label: 'created_at_fiscal_quarter',
+                            table: 'orders',
+                            tableLabel: 'orders',
+                            fieldType: FieldType.DIMENSION,
+                            sql: '${TABLE}.created_at_fiscal_quarter',
+                            compiledSql: '"orders".created_at_fiscal_quarter',
+                            tablesReferences: ['orders'],
+                            hidden: false,
+                            timeIntervalBaseDimensionName: 'created_at',
+                            customTimeInterval: 'fiscal_quarter',
+                        },
+                    },
+                },
+            },
+        };
+
+        const queryWithOnlyStringDerivedTimeFilter: CompiledMetricQuery = {
+            ...METRIC_QUERY_WITH_DATE_FILTER,
+            filters: {
+                dimensions: {
+                    id: 'root',
+                    and: [
+                        {
+                            id: 'string-derived-filter',
+                            target: {
+                                fieldId: 'orders_created_at_fiscal_quarter',
+                            },
+                            operator: FilterOperator.EQUALS,
+                            values: ['FY2024-Q1'],
+                        },
+                    ],
+                },
+            },
+        };
+
+        const query = replaceWhitespace(
+            buildQuery({
+                explore: exploreWithStringDerivedTimeDimension,
+                compiledMetricQuery: queryWithOnlyStringDerivedTimeFilter,
+                warehouseSqlBuilder: warehouseClientMock,
+                intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+                timezone: QUERY_BUILDER_UTC_TIMEZONE,
+            }).query,
+        );
+
+        expect(query).toContain(
+            replaceWhitespace(
+                '(("orders".created_at) >= (\'2024-09-01\') AND ("orders".created_at) <= (\'2024-09-04\'))',
+            ),
         );
     });
 
@@ -4796,5 +5263,64 @@ describe('Nested aggregate metrics', () => {
 
         // ratio_of_sum_case should reference CTE columns, not base table
         expect(result.query).toContain('nested_agg."my_table_max_value"');
+    });
+
+    test('should emit nested aggregate metric only once when fanout CTEs are also generated', () => {
+        const result = buildQuery({
+            explore: EXPLORE_WITH_NESTED_AGG_AND_FANOUT,
+            compiledMetricQuery: METRIC_QUERY_NESTED_AGG_WITH_FANOUT,
+            warehouseSqlBuilder: warehouseClientMock,
+            intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+            timezone: QUERY_BUILDER_UTC_TIMEZONE,
+        });
+
+        expect(result.query).toContain('cte_metrics_my_table AS (');
+        expect(result.query).toContain('nested_agg_results AS (');
+        expect(result.query).toContain(
+            'nested_agg_results."my_table_sum_of_max"',
+        );
+        expect(result.query.match(/AS "my_table_sum_of_max"/g)).toHaveLength(1);
+    });
+
+    test('should emit cross-table nested aggregate metric only once when fanout CTEs are also generated', () => {
+        const result = buildQuery({
+            explore: EXPLORE_WITH_NESTED_AGG_AND_FANOUT,
+            compiledMetricQuery:
+                METRIC_QUERY_NESTED_AGG_WITH_FANOUT_CROSS_TABLE,
+            warehouseSqlBuilder: warehouseClientMock,
+            intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+            timezone: QUERY_BUILDER_UTC_TIMEZONE,
+        });
+
+        expect(result.query).toContain('cte_metrics_my_table AS (');
+        expect(result.query).toContain('nested_agg_results AS (');
+        expect(result.query).toContain(
+            'nested_agg_results."my_table_cross_table_sum_of_max"',
+        );
+        expect(
+            result.query.match(/AS "my_table_cross_table_sum_of_max"/g),
+        ).toHaveLength(1);
+    });
+
+    test('should emit max_by nested aggregate metric only once when fanout CTEs are also generated', () => {
+        const result = buildQuery({
+            explore: EXPLORE_WITH_NESTED_AGG_AND_FANOUT,
+            compiledMetricQuery: {
+                ...METRIC_QUERY_NESTED_AGG_WITH_FANOUT,
+                metrics: ['my_table_max_by_of_agg', 'my_table_count_records'],
+                sorts: [
+                    { fieldId: 'my_table_max_by_of_agg', descending: true },
+                ],
+            },
+            warehouseSqlBuilder: warehouseClientMock,
+            intrinsicUserAttributes: INTRINSIC_USER_ATTRIBUTES,
+            timezone: QUERY_BUILDER_UTC_TIMEZONE,
+        });
+
+        // The max_by metric should be emitted exactly once via nested_agg_results
+        expect(result.query).toContain('nested_agg_results AS (');
+        expect(result.query.match(/AS "my_table_max_by_of_agg"/g)).toHaveLength(
+            1,
+        );
     });
 });

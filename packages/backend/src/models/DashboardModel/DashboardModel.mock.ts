@@ -267,6 +267,7 @@ export const expectedDashboard: DashboardDAO = {
     uuid: dashboardEntry.dashboard_uuid,
     name: dashboardEntry.name,
     slug: `name`,
+    verification: null,
 
     description: dashboardEntry.description,
     updatedAt: dashboardVersionEntry.created_at,
@@ -352,6 +353,7 @@ export const expectedAllDashboards: DashboardBasicDetailsWithTileTypes[] = [
         views: 1,
         firstViewedAt: new Date(1),
         validationErrors: [],
+        verification: null,
         tileTypes: [DashboardTileTypes.SAVED_CHART],
     },
 ];

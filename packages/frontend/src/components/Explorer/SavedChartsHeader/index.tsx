@@ -21,7 +21,10 @@ import { useDisclosure } from '@mantine-8/hooks';
 import {
     IconAlertCircle,
     IconArrowBack,
+    IconArrowsExchange,
     IconBell,
+    IconCircleCheck,
+    IconCircleCheckFilled,
     IconCirclePlus,
     IconCirclesRelation,
     IconCopy,
@@ -40,6 +43,7 @@ import {
     IconTrash,
 } from '@tabler/icons-react';
 import {
+    lazy,
     useCallback,
     useEffect,
     useMemo,
@@ -76,11 +80,19 @@ import { useFavoriteMutation } from '../../../hooks/favorites/useFavoriteMutatio
 import { useFavorites } from '../../../hooks/favorites/useFavorites';
 import { useChartPinningMutation } from '../../../hooks/pinning/useChartPinningMutation';
 import { useContentAction } from '../../../hooks/useContent';
+import {
+    useUnverifyChartMutation,
+    useVerifyChartMutation,
+} from '../../../hooks/useContentVerification';
+import { useContentVerificationEnabled } from '../../../hooks/useContentVerificationEnabled';
 import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
 import { useProject } from '../../../hooks/useProject';
 import { useUpdateMutation } from '../../../hooks/useSavedQuery';
 import useSearchParams from '../../../hooks/useSearchParams';
-import { useClientFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
+import {
+    useClientFeatureFlag,
+    useServerFeatureFlag,
+} from '../../../hooks/useServerOrClientFeatureFlag';
 import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import {
@@ -92,6 +104,9 @@ import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
 import MantineIcon from '../../common/MantineIcon';
 import MantineModal from '../../common/MantineModal';
+const ChangeChartExploreModal = lazy(
+    () => import('../../common/modal/ChangeChartExploreModal'),
+);
 import ChartCreateModal from '../../common/modal/ChartCreateModal';
 import ChartDeleteModal from '../../common/modal/ChartDeleteModal';
 import ChartDuplicateModal from '../../common/modal/ChartDuplicateModal';
@@ -111,6 +126,10 @@ const SavedChartsHeader: FC = () => {
     const userTimeZonesEnabled = useClientFeatureFlag(
         FeatureFlags.EnableUserTimezones,
     );
+    const { data: changeChartExploreFlag } = useServerFeatureFlag(
+        FeatureFlags.ChangeChartExplore,
+    );
+    const changeChartExploreEnabled = changeChartExploreFlag?.enabled === true;
 
     const { search, pathname } = useLocation();
     const { projectUuid } = useParams<{
@@ -174,6 +193,8 @@ const SavedChartsHeader: FC = () => {
     const [isAddToDashboardModalOpen, addToDashboardModalHandlers] =
         useDisclosure();
     const [isChartDuplicateModalOpen, chartDuplicateModalHandlers] =
+        useDisclosure();
+    const [isChangeExploreModalOpen, changeExploreModalHandlers] =
         useDisclosure();
     const [isTransferToSpaceModalOpen, transferToSpaceModalHandlers] =
         useDisclosure();
@@ -324,6 +345,14 @@ const SavedChartsHeader: FC = () => {
         }),
     );
 
+    const userCanUpdateProject = user.data?.ability.can(
+        'update',
+        subject('Project', {
+            organizationUuid: user.data?.organizationUuid,
+            projectUuid,
+        }),
+    );
+
     const userCanCreateDeliveriesAndAlerts = user.data?.ability?.can(
         'create',
         subject('ScheduledDeliveries', {
@@ -331,6 +360,24 @@ const SavedChartsHeader: FC = () => {
             projectUuid,
         }),
     );
+
+    const isContentVerificationEnabled = useContentVerificationEnabled();
+
+    const canManageContentVerification =
+        user.data?.ability?.can(
+            'manage',
+            subject('ContentVerification', {
+                organizationUuid: user.data?.organizationUuid,
+                projectUuid,
+            }),
+        ) === true;
+
+    const { mutate: verifyChart } = useVerifyChartMutation();
+    const { mutate: unverifyChart } = useUnverifyChartMutation();
+
+    const isChartVerified =
+        savedChart?.verification !== null &&
+        savedChart?.verification !== undefined;
 
     const userCanPinChart = user.data?.ability.can(
         'manage',
@@ -366,6 +413,7 @@ const SavedChartsHeader: FC = () => {
                 },
                 modals: defaultState.modals,
                 queryExecution: defaultQueryExecution,
+                preAggregate: defaultState.preAggregate,
             };
             dispatch(explorerActions.reset(resetState));
         }
@@ -434,6 +482,28 @@ const SavedChartsHeader: FC = () => {
                                 >
                                     {savedChart.name}
                                 </Title>
+
+                                {isContentVerificationEnabled &&
+                                    isChartVerified && (
+                                        <Tooltip
+                                            label={
+                                                savedChart?.verification
+                                                    ?.verifiedBy
+                                                    ? `Verified by ${savedChart.verification.verifiedBy.firstName} ${savedChart.verification.verifiedBy.lastName}`
+                                                    : 'Verified'
+                                            }
+                                            withArrow
+                                            withinPortal
+                                            zIndex={10000}
+                                        >
+                                            <IconCircleCheckFilled
+                                                size={16}
+                                                style={{
+                                                    color: 'var(--mantine-color-green-6)',
+                                                }}
+                                            />
+                                        </Tooltip>
+                                    )}
 
                                 <ActionIcon
                                     size="xs"
@@ -690,6 +760,22 @@ const SavedChartsHeader: FC = () => {
                                         Version history
                                     </Menu.Item>
                                 )}
+                                {changeChartExploreEnabled &&
+                                    userCanUpdateProject &&
+                                    !isEditMode && (
+                                        <Menu.Item
+                                            leftSection={
+                                                <MantineIcon
+                                                    icon={IconArrowsExchange}
+                                                />
+                                            }
+                                            onClick={
+                                                changeExploreModalHandlers.open
+                                            }
+                                        >
+                                            Change explore
+                                        </Menu.Item>
+                                    )}
                                 {
                                     <Tooltip
                                         label={
@@ -722,6 +808,40 @@ const SavedChartsHeader: FC = () => {
                                         </div>
                                     </Tooltip>
                                 }
+
+                                {isContentVerificationEnabled &&
+                                    canManageContentVerification &&
+                                    savedChart?.uuid && (
+                                        <Menu.Item
+                                            leftSection={
+                                                isChartVerified ? (
+                                                    <IconCircleCheckFilled
+                                                        size={18}
+                                                        color="var(--mantine-color-green-6)"
+                                                    />
+                                                ) : (
+                                                    <IconCircleCheck
+                                                        size={18}
+                                                    />
+                                                )
+                                            }
+                                            onClick={() => {
+                                                if (isChartVerified) {
+                                                    unverifyChart(
+                                                        savedChart.uuid,
+                                                    );
+                                                } else {
+                                                    verifyChart(
+                                                        savedChart.uuid,
+                                                    );
+                                                }
+                                            }}
+                                        >
+                                            {isChartVerified
+                                                ? 'Remove verification'
+                                                : 'Verify'}
+                                        </Menu.Item>
+                                    )}
 
                                 <Menu.Divider />
                                 <Menu.Label>Integrations</Menu.Label>
@@ -960,6 +1080,19 @@ const SavedChartsHeader: FC = () => {
                     }}
                 />
             )}
+
+            {isChangeExploreModalOpen &&
+                savedChart &&
+                projectUuid &&
+                savedChart.tableName && (
+                    <ChangeChartExploreModal
+                        opened={isChangeExploreModalOpen}
+                        onClose={changeExploreModalHandlers.close}
+                        projectUuid={projectUuid}
+                        chartUuid={savedChart.uuid}
+                        currentExploreName={savedChart.tableName}
+                    />
+                )}
         </TrackSection>
     );
 };

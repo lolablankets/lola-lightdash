@@ -1568,6 +1568,31 @@
                 "required": ["content"],
                 "type": "object"
             },
+            "ContentVerificationInfo": {
+                "properties": {
+                    "verifiedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "verifiedBy": {
+                        "properties": {
+                            "lastName": {
+                                "type": "string"
+                            },
+                            "firstName": {
+                                "type": "string"
+                            },
+                            "userUuid": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["lastName", "firstName", "userUuid"],
+                        "type": "object"
+                    }
+                },
+                "required": ["verifiedAt", "verifiedBy"],
+                "type": "object"
+            },
             "DashboardTileTypes": {
                 "enum": [
                     "saved_chart",
@@ -1603,7 +1628,8 @@
                         "format": "double"
                     },
                     "tabUuid": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": ["uuid", "type", "x", "y", "h", "w"],
@@ -2307,6 +2333,14 @@
                     "description": {
                         "type": "string"
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "name": {
                         "type": "string"
                     },
@@ -2341,6 +2375,7 @@
                     "filters",
                     "tiles",
                     "updatedAt",
+                    "verification",
                     "name",
                     "uuid",
                     "versionUuid",
@@ -4928,8 +4963,33 @@
                 "type": "object",
                 "description": "Construct a type with a set of properties K of type T"
             },
+            "RowLimit": {
+                "properties": {
+                    "count": {
+                        "type": "number",
+                        "format": "double",
+                        "description": "Number of rows to show or hide"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["first", "last"],
+                        "description": "Whether to target the first or last N rows"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["show", "hide"],
+                        "description": "Whether to show or hide the selected rows"
+                    }
+                },
+                "required": ["count", "direction", "mode"],
+                "type": "object"
+            },
             "CartesianChart": {
                 "properties": {
+                    "rowLimit": {
+                        "$ref": "#/components/schemas/RowLimit",
+                        "description": "Limit displayed rows to first/last N"
+                    },
                     "metadata": {
                         "$ref": "#/components/schemas/Record_string.SeriesMetadata_",
                         "description": "Metadata for series (colors, etc.)"
@@ -5232,6 +5292,10 @@
             },
             "TableChart": {
                 "properties": {
+                    "rowLimit": {
+                        "$ref": "#/components/schemas/RowLimit",
+                        "description": "Limit displayed rows to first/last N"
+                    },
                     "metricsAsRows": {
                         "type": "boolean",
                         "description": "Display metrics as rows instead of columns"
@@ -5740,6 +5804,14 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "slug": {
                         "type": "string",
                         "description": "Unique identifier slug for this chart"
@@ -5853,6 +5925,7 @@
                     }
                 },
                 "required": [
+                    "verification",
                     "slug",
                     "access",
                     "inheritsFromOrgOrProject",
@@ -6037,11 +6110,36 @@
                 "required": ["interval", "field"],
                 "type": "object"
             },
+            "InlineErrorType": {
+                "enum": [
+                    "METADATA_PARSE_ERROR",
+                    "NO_DIMENSIONS_FOUND",
+                    "SKIPPED_JOIN",
+                    "MISSING_TABLE",
+                    "FIELD_ERROR",
+                    "SET_VALIDATION_ERROR",
+                    "INVALID_PARAMETER",
+                    "DUPLICATE_FIELD_NAME"
+                ],
+                "type": "string"
+            },
+            "InlineError": {
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "$ref": "#/components/schemas/InlineErrorType"
+                    }
+                },
+                "required": ["message", "type"],
+                "type": "object"
+            },
             "TableBase": {
                 "properties": {
                     "warnings": {
                         "items": {
-                            "type": "string"
+                            "$ref": "#/components/schemas/InlineError"
                         },
                         "type": "array"
                     },
@@ -6749,6 +6847,10 @@
                         },
                         "type": "object"
                     },
+                    "maxRows": {
+                        "type": "number",
+                        "format": "double"
+                    },
                     "granularity": {
                         "$ref": "#/components/schemas/TimeFrames"
                     },
@@ -6784,28 +6886,6 @@
                     }
                 },
                 "required": ["preAggregateName", "sourceExploreName"],
-                "type": "object"
-            },
-            "InlineErrorType": {
-                "enum": [
-                    "METADATA_PARSE_ERROR",
-                    "NO_DIMENSIONS_FOUND",
-                    "SKIPPED_JOIN",
-                    "MISSING_TABLE",
-                    "FIELD_ERROR"
-                ],
-                "type": "string"
-            },
-            "InlineError": {
-                "properties": {
-                    "message": {
-                        "type": "string"
-                    },
-                    "type": {
-                        "$ref": "#/components/schemas/InlineErrorType"
-                    }
-                },
-                "required": ["message", "type"],
                 "type": "object"
             },
             "Explore": {
@@ -7089,6 +7169,10 @@
                 "enum": ["table_calculation_present"],
                 "type": "string"
             },
+            "PreAggregateMissReason.USER_BYPASS": {
+                "enum": ["user_bypass"],
+                "type": "string"
+            },
             "PreAggregateMatchMiss": {
                 "anyOf": [
                     {
@@ -7212,6 +7296,18 @@
                             }
                         },
                         "required": ["reason"],
+                        "type": "object"
+                    },
+                    {
+                        "properties": {
+                            "preAggregateName": {
+                                "type": "string"
+                            },
+                            "reason": {
+                                "$ref": "#/components/schemas/PreAggregateMissReason.USER_BYPASS"
+                            }
+                        },
+                        "required": ["preAggregateName", "reason"],
                         "type": "object"
                     }
                 ]
@@ -7764,6 +7860,58 @@
                     }
                 },
                 "required": ["refreshedAt", "cached", "results", "search"],
+                "type": "object"
+            },
+            "ApiGenerateAppResponse": {
+                "properties": {
+                    "results": {
+                        "properties": {
+                            "versionUuid": {
+                                "type": "string"
+                            },
+                            "appUuid": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["versionUuid", "appUuid"],
+                        "type": "object"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
+                "type": "object"
+            },
+            "GenerateAppRequestBody": {
+                "properties": {
+                    "prompt": {
+                        "type": "string"
+                    }
+                },
+                "required": ["prompt"],
+                "type": "object"
+            },
+            "ApiPreviewTokenResponse": {
+                "properties": {
+                    "results": {
+                        "properties": {
+                            "token": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["token"],
+                        "type": "object"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
                 "type": "object"
             },
             "DashboardSummaryTone": {
@@ -9263,6 +9411,19 @@
                                                     "status": {
                                                         "type": "string",
                                                         "enum": [
+                                                            "error",
+                                                            "success"
+                                                        ]
+                                                    }
+                                                },
+                                                "required": ["status"],
+                                                "type": "object"
+                                            },
+                                            {
+                                                "properties": {
+                                                    "status": {
+                                                        "type": "string",
+                                                        "enum": [
                                                             "success",
                                                             "error"
                                                         ]
@@ -10709,6 +10870,394 @@
                     }
                 },
                 "required": ["changeUuid"],
+                "type": "object"
+            },
+            "PreAggregateDailyStatResult": {
+                "properties": {
+                    "updatedAt": {
+                        "type": "string"
+                    },
+                    "preAggregateName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "missReason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "missCount": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "hitCount": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "queryContext": {
+                        "type": "string"
+                    },
+                    "dashboardName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "dashboardUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "chartName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "chartUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "date": {
+                        "type": "string"
+                    },
+                    "exploreName": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "updatedAt",
+                    "preAggregateName",
+                    "missReason",
+                    "missCount",
+                    "hitCount",
+                    "queryContext",
+                    "dashboardName",
+                    "dashboardUuid",
+                    "chartName",
+                    "chartUuid",
+                    "date",
+                    "exploreName"
+                ],
+                "type": "object"
+            },
+            "ApiPreAggregateStatsResults": {
+                "properties": {
+                    "stats": {
+                        "items": {
+                            "$ref": "#/components/schemas/PreAggregateDailyStatResult"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": ["stats"],
+                "type": "object"
+            },
+            "KnexPaginatedData_ApiPreAggregateStatsResults_": {
+                "properties": {
+                    "pagination": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/KnexPaginateArgs"
+                            },
+                            {
+                                "properties": {
+                                    "totalResults": {
+                                        "type": "number",
+                                        "format": "double"
+                                    },
+                                    "totalPageCount": {
+                                        "type": "number",
+                                        "format": "double"
+                                    }
+                                },
+                                "required": ["totalResults", "totalPageCount"],
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "data": {
+                        "$ref": "#/components/schemas/ApiPreAggregateStatsResults"
+                    }
+                },
+                "required": ["data"],
+                "type": "object"
+            },
+            "ApiGetPreAggregateStatsResponse": {
+                "properties": {
+                    "results": {
+                        "$ref": "#/components/schemas/KnexPaginatedData_ApiPreAggregateStatsResults_"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
+                "type": "object"
+            },
+            "PreAggregateMaterializationWarning": {
+                "anyOf": [
+                    {
+                        "properties": {
+                            "threshold": {
+                                "type": "number",
+                                "format": "double"
+                            },
+                            "rowCount": {
+                                "type": "number",
+                                "format": "double"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "type": {
+                                "type": "string",
+                                "enum": ["row_count_exceeded"],
+                                "nullable": false
+                            }
+                        },
+                        "required": [
+                            "threshold",
+                            "rowCount",
+                            "message",
+                            "type"
+                        ],
+                        "type": "object"
+                    },
+                    {
+                        "properties": {
+                            "maxRows": {
+                                "type": "number",
+                                "format": "double"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "type": {
+                                "type": "string",
+                                "enum": ["max_rows_applied"],
+                                "nullable": false
+                            }
+                        },
+                        "required": ["maxRows", "message", "type"],
+                        "type": "object"
+                    }
+                ]
+            },
+            "PreAggregateMaterializationStatus": {
+                "type": "string",
+                "enum": ["in_progress", "active", "superseded", "failed"]
+            },
+            "ResultColumn": {
+                "properties": {
+                    "type": {
+                        "$ref": "#/components/schemas/DimensionType"
+                    },
+                    "reference": {
+                        "type": "string"
+                    }
+                },
+                "required": ["type", "reference"],
+                "type": "object"
+            },
+            "Record_string.ResultColumn_": {
+                "properties": {},
+                "additionalProperties": {
+                    "$ref": "#/components/schemas/ResultColumn"
+                },
+                "type": "object",
+                "description": "Construct a type with a set of properties K of type T"
+            },
+            "ResultColumns": {
+                "$ref": "#/components/schemas/Record_string.ResultColumn_"
+            },
+            "PreAggregateMaterializationTrigger": {
+                "type": "string",
+                "enum": ["compile", "cron", "manual", "webhook"]
+            },
+            "PreAggregateMaterializationSummary": {
+                "properties": {
+                    "materialization": {
+                        "properties": {
+                            "trigger": {
+                                "$ref": "#/components/schemas/PreAggregateMaterializationTrigger"
+                            },
+                            "errorMessage": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "totalBytes": {
+                                "type": "number",
+                                "format": "double",
+                                "nullable": true
+                            },
+                            "columns": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/ResultColumns"
+                                    }
+                                ],
+                                "nullable": true
+                            },
+                            "rowCount": {
+                                "type": "number",
+                                "format": "double",
+                                "nullable": true
+                            },
+                            "durationMs": {
+                                "type": "number",
+                                "format": "double",
+                                "nullable": true
+                            },
+                            "materializedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true
+                            },
+                            "status": {
+                                "$ref": "#/components/schemas/PreAggregateMaterializationStatus"
+                            },
+                            "materializationUuid": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "trigger",
+                            "errorMessage",
+                            "totalBytes",
+                            "columns",
+                            "rowCount",
+                            "durationMs",
+                            "materializedAt",
+                            "status",
+                            "materializationUuid"
+                        ],
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "warnings": {
+                        "items": {
+                            "$ref": "#/components/schemas/PreAggregateMaterializationWarning"
+                        },
+                        "type": "array"
+                    },
+                    "resolvedMaxRows": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "definitionError": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "refreshCron": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "granularity": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/TimeFrames"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "timeDimension": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "metrics": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array"
+                    },
+                    "dimensions": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array"
+                    },
+                    "sourceExploreName": {
+                        "type": "string"
+                    },
+                    "preAggExploreName": {
+                        "type": "string"
+                    },
+                    "preAggregateName": {
+                        "type": "string"
+                    },
+                    "preAggregateDefinitionUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "materialization",
+                    "warnings",
+                    "resolvedMaxRows",
+                    "definitionError",
+                    "refreshCron",
+                    "granularity",
+                    "timeDimension",
+                    "metrics",
+                    "dimensions",
+                    "sourceExploreName",
+                    "preAggExploreName",
+                    "preAggregateName",
+                    "preAggregateDefinitionUuid"
+                ],
+                "type": "object"
+            },
+            "ApiPreAggregateMaterializationsResults": {
+                "properties": {
+                    "materializations": {
+                        "items": {
+                            "$ref": "#/components/schemas/PreAggregateMaterializationSummary"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": ["materializations"],
+                "type": "object"
+            },
+            "KnexPaginatedData_ApiPreAggregateMaterializationsResults_": {
+                "properties": {
+                    "pagination": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/KnexPaginateArgs"
+                            },
+                            {
+                                "properties": {
+                                    "totalResults": {
+                                        "type": "number",
+                                        "format": "double"
+                                    },
+                                    "totalPageCount": {
+                                        "type": "number",
+                                        "format": "double"
+                                    }
+                                },
+                                "required": ["totalResults", "totalPageCount"],
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "data": {
+                        "$ref": "#/components/schemas/ApiPreAggregateMaterializationsResults"
+                    }
+                },
+                "required": ["data"],
+                "type": "object"
+            },
+            "ApiGetPreAggregateMaterializationsResponse": {
+                "properties": {
+                    "results": {
+                        "$ref": "#/components/schemas/KnexPaginatedData_ApiPreAggregateMaterializationsResults_"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
                 "type": "object"
             },
             "WarehouseTypes": {
@@ -15469,6 +16018,14 @@
                         "type": "number",
                         "format": "double"
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "tiles": {
                         "items": {
                             "$ref": "#/components/schemas/DashboardTile"
@@ -15542,6 +16099,7 @@
                     "pinnedListOrder",
                     "slug",
                     "dashboardVersionId",
+                    "verification",
                     "tiles",
                     "filters",
                     "spaceName",
@@ -15630,6 +16188,14 @@
                         "type": "string",
                         "description": "Unique identifier slug for this chart"
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "updatedByUser": {
                         "$ref": "#/components/schemas/UpdatedByUser"
                     },
@@ -15713,6 +16279,7 @@
                     "pinnedListUuid",
                     "pinnedListOrder",
                     "slug",
+                    "verification",
                     "spaceName",
                     "tableName",
                     "metricQuery",
@@ -15990,6 +16557,758 @@
                 "required": ["results", "status"],
                 "type": "object"
             },
+            "SchedulerFormat": {
+                "enum": ["csv", "xlsx", "image", "gsheets"],
+                "type": "string"
+            },
+            "SchedulerCsvOptions": {
+                "properties": {
+                    "asAttachment": {
+                        "type": "boolean"
+                    },
+                    "limit": {
+                        "anyOf": [
+                            {
+                                "type": "number",
+                                "format": "double"
+                            },
+                            {
+                                "type": "string",
+                                "enum": ["table", "all"]
+                            }
+                        ]
+                    },
+                    "formatted": {
+                        "type": "boolean"
+                    }
+                },
+                "required": ["limit", "formatted"],
+                "type": "object"
+            },
+            "SchedulerImageOptions": {
+                "properties": {
+                    "withPdf": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "SchedulerGsheetsOptions": {
+                "properties": {
+                    "tabName": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    },
+                    "gdriveOrganizationName": {
+                        "type": "string"
+                    },
+                    "gdriveName": {
+                        "type": "string"
+                    },
+                    "gdriveId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "url",
+                    "gdriveOrganizationName",
+                    "gdriveName",
+                    "gdriveId"
+                ],
+                "type": "object"
+            },
+            "SchedulerOptions": {
+                "anyOf": [
+                    {
+                        "$ref": "#/components/schemas/SchedulerCsvOptions"
+                    },
+                    {
+                        "$ref": "#/components/schemas/SchedulerImageOptions"
+                    },
+                    {
+                        "$ref": "#/components/schemas/SchedulerGsheetsOptions"
+                    }
+                ]
+            },
+            "ThresholdOperator": {
+                "enum": [
+                    "greaterThan",
+                    "lessThan",
+                    "increasedBy",
+                    "decreasedBy"
+                ],
+                "type": "string"
+            },
+            "ThresholdOptions": {
+                "properties": {
+                    "value": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "fieldId": {
+                        "type": "string"
+                    },
+                    "operator": {
+                        "$ref": "#/components/schemas/ThresholdOperator"
+                    }
+                },
+                "required": ["value", "fieldId", "operator"],
+                "type": "object"
+            },
+            "NotificationFrequency": {
+                "enum": ["always", "once"],
+                "type": "string"
+            },
+            "SchedulerBase": {
+                "properties": {
+                    "projectName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "projectUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "includeLinks": {
+                        "type": "boolean"
+                    },
+                    "notificationFrequency": {
+                        "$ref": "#/components/schemas/NotificationFrequency"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "thresholds": {
+                        "items": {
+                            "$ref": "#/components/schemas/ThresholdOptions"
+                        },
+                        "type": "array"
+                    },
+                    "options": {
+                        "$ref": "#/components/schemas/SchedulerOptions"
+                    },
+                    "savedSqlName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "savedSqlUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "dashboardName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "dashboardUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "savedChartName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "savedChartUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "projectSchedulerTimezone": {
+                        "type": "string"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "cron": {
+                        "type": "string"
+                    },
+                    "format": {
+                        "$ref": "#/components/schemas/SchedulerFormat"
+                    },
+                    "createdByName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "createdBy": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "schedulerUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "includeLinks",
+                    "enabled",
+                    "options",
+                    "savedSqlName",
+                    "savedSqlUuid",
+                    "dashboardName",
+                    "dashboardUuid",
+                    "savedChartName",
+                    "savedChartUuid",
+                    "cron",
+                    "format",
+                    "createdByName",
+                    "createdBy",
+                    "updatedAt",
+                    "createdAt",
+                    "name",
+                    "schedulerUuid"
+                ],
+                "type": "object"
+            },
+            "ChartScheduler": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/SchedulerBase"
+                    },
+                    {
+                        "properties": {
+                            "savedSqlUuid": {
+                                "type": "number",
+                                "enum": [null],
+                                "nullable": true
+                            },
+                            "dashboardUuid": {
+                                "type": "number",
+                                "enum": [null],
+                                "nullable": true
+                            },
+                            "savedChartUuid": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "savedSqlUuid",
+                            "dashboardUuid",
+                            "savedChartUuid"
+                        ],
+                        "type": "object"
+                    }
+                ]
+            },
+            "DashboardScheduler": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/SchedulerBase"
+                    },
+                    {
+                        "properties": {
+                            "selectedTabs": {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array",
+                                "nullable": true
+                            },
+                            "customViewportWidth": {
+                                "type": "number",
+                                "format": "double"
+                            },
+                            "parameters": {
+                                "$ref": "#/components/schemas/ParametersValuesMap"
+                            },
+                            "filters": {
+                                "items": {
+                                    "$ref": "#/components/schemas/DashboardFilterRule"
+                                },
+                                "type": "array"
+                            },
+                            "savedSqlUuid": {
+                                "type": "number",
+                                "enum": [null],
+                                "nullable": true
+                            },
+                            "dashboardUuid": {
+                                "type": "string"
+                            },
+                            "savedChartUuid": {
+                                "type": "number",
+                                "enum": [null],
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "selectedTabs",
+                            "savedSqlUuid",
+                            "dashboardUuid",
+                            "savedChartUuid"
+                        ],
+                        "type": "object"
+                    }
+                ]
+            },
+            "SqlChartScheduler": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/SchedulerBase"
+                    },
+                    {
+                        "properties": {
+                            "savedSqlUuid": {
+                                "type": "string"
+                            },
+                            "dashboardUuid": {
+                                "type": "number",
+                                "enum": [null],
+                                "nullable": true
+                            },
+                            "savedChartUuid": {
+                                "type": "number",
+                                "enum": [null],
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "savedSqlUuid",
+                            "dashboardUuid",
+                            "savedChartUuid"
+                        ],
+                        "type": "object"
+                    }
+                ]
+            },
+            "Scheduler": {
+                "anyOf": [
+                    {
+                        "$ref": "#/components/schemas/ChartScheduler"
+                    },
+                    {
+                        "$ref": "#/components/schemas/DashboardScheduler"
+                    },
+                    {
+                        "$ref": "#/components/schemas/SqlChartScheduler"
+                    }
+                ]
+            },
+            "SchedulerSlackTarget": {
+                "properties": {
+                    "channel": {
+                        "type": "string"
+                    },
+                    "schedulerUuid": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "schedulerSlackTargetUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "channel",
+                    "schedulerUuid",
+                    "updatedAt",
+                    "createdAt",
+                    "schedulerSlackTargetUuid"
+                ],
+                "type": "object"
+            },
+            "SchedulerEmailTarget": {
+                "properties": {
+                    "recipient": {
+                        "type": "string"
+                    },
+                    "schedulerUuid": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "schedulerEmailTargetUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "recipient",
+                    "schedulerUuid",
+                    "updatedAt",
+                    "createdAt",
+                    "schedulerEmailTargetUuid"
+                ],
+                "type": "object"
+            },
+            "SchedulerMsTeamsTarget": {
+                "properties": {
+                    "webhook": {
+                        "type": "string"
+                    },
+                    "schedulerUuid": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "schedulerMsTeamsTargetUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "webhook",
+                    "schedulerUuid",
+                    "updatedAt",
+                    "createdAt",
+                    "schedulerMsTeamsTargetUuid"
+                ],
+                "type": "object"
+            },
+            "SchedulerGoogleChatTarget": {
+                "properties": {
+                    "googleChatWebhook": {
+                        "type": "string"
+                    },
+                    "schedulerUuid": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "schedulerGoogleChatTargetUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "googleChatWebhook",
+                    "schedulerUuid",
+                    "updatedAt",
+                    "createdAt",
+                    "schedulerGoogleChatTargetUuid"
+                ],
+                "type": "object"
+            },
+            "SchedulerJobStatus": {
+                "enum": ["scheduled", "started", "completed", "error"],
+                "type": "string"
+            },
+            "SchedulerRunStatus": {
+                "enum": [
+                    "completed",
+                    "partial_failure",
+                    "failed",
+                    "running",
+                    "scheduled"
+                ],
+                "type": "string"
+            },
+            "Record_string.AnyType_": {
+                "properties": {},
+                "additionalProperties": {},
+                "type": "object",
+                "description": "Construct a type with a set of properties K of type T"
+            },
+            "LogCounts": {
+                "properties": {
+                    "error": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "completed": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "started": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "scheduled": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "total": {
+                        "type": "number",
+                        "format": "double"
+                    }
+                },
+                "required": [
+                    "error",
+                    "completed",
+                    "started",
+                    "scheduled",
+                    "total"
+                ],
+                "type": "object"
+            },
+            "SchedulerResourceType": {
+                "enum": ["chart", "dashboard", "sqlChart"],
+                "type": "string"
+            },
+            "SchedulerRun": {
+                "properties": {
+                    "format": {
+                        "$ref": "#/components/schemas/SchedulerFormat"
+                    },
+                    "createdByUserName": {
+                        "type": "string"
+                    },
+                    "createdByUserUuid": {
+                        "type": "string"
+                    },
+                    "resourceName": {
+                        "type": "string"
+                    },
+                    "resourceUuid": {
+                        "type": "string"
+                    },
+                    "resourceType": {
+                        "$ref": "#/components/schemas/SchedulerResourceType"
+                    },
+                    "logCounts": {
+                        "$ref": "#/components/schemas/LogCounts"
+                    },
+                    "details": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/Record_string.AnyType_"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "runStatus": {
+                        "$ref": "#/components/schemas/SchedulerRunStatus"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/SchedulerJobStatus"
+                    },
+                    "scheduledTime": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "schedulerName": {
+                        "type": "string"
+                    },
+                    "schedulerUuid": {
+                        "type": "string"
+                    },
+                    "runId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "format",
+                    "createdByUserName",
+                    "createdByUserUuid",
+                    "resourceName",
+                    "resourceUuid",
+                    "resourceType",
+                    "logCounts",
+                    "details",
+                    "createdAt",
+                    "runStatus",
+                    "status",
+                    "scheduledTime",
+                    "schedulerName",
+                    "schedulerUuid",
+                    "runId"
+                ],
+                "type": "object"
+            },
+            "SchedulerAndTargets": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/Scheduler"
+                    },
+                    {
+                        "properties": {
+                            "latestRun": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/SchedulerRun"
+                                    }
+                                ],
+                                "nullable": true
+                            },
+                            "targets": {
+                                "items": {
+                                    "anyOf": [
+                                        {
+                                            "$ref": "#/components/schemas/SchedulerSlackTarget"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SchedulerEmailTarget"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SchedulerMsTeamsTarget"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SchedulerGoogleChatTarget"
+                                        }
+                                    ]
+                                },
+                                "type": "array"
+                            }
+                        },
+                        "required": ["targets"],
+                        "type": "object"
+                    }
+                ]
+            },
+            "Pick_SchedulerSlackTarget.channel_": {
+                "properties": {
+                    "channel": {
+                        "type": "string"
+                    }
+                },
+                "required": ["channel"],
+                "type": "object",
+                "description": "From T, pick a set of properties whose keys are in the union K"
+            },
+            "Pick_SchedulerMsTeamsTarget.webhook_": {
+                "properties": {
+                    "webhook": {
+                        "type": "string"
+                    }
+                },
+                "required": ["webhook"],
+                "type": "object",
+                "description": "From T, pick a set of properties whose keys are in the union K"
+            },
+            "Pick_SchedulerGoogleChatTarget.googleChatWebhook_": {
+                "properties": {
+                    "googleChatWebhook": {
+                        "type": "string"
+                    }
+                },
+                "required": ["googleChatWebhook"],
+                "type": "object",
+                "description": "From T, pick a set of properties whose keys are in the union K"
+            },
+            "Pick_SchedulerEmailTarget.recipient_": {
+                "properties": {
+                    "recipient": {
+                        "type": "string"
+                    }
+                },
+                "required": ["recipient"],
+                "type": "object",
+                "description": "From T, pick a set of properties whose keys are in the union K"
+            },
+            "CreateSchedulerTarget": {
+                "anyOf": [
+                    {
+                        "$ref": "#/components/schemas/Pick_SchedulerSlackTarget.channel_"
+                    },
+                    {
+                        "$ref": "#/components/schemas/Pick_SchedulerMsTeamsTarget.webhook_"
+                    },
+                    {
+                        "$ref": "#/components/schemas/Pick_SchedulerGoogleChatTarget.googleChatWebhook_"
+                    },
+                    {
+                        "$ref": "#/components/schemas/Pick_SchedulerEmailTarget.recipient_"
+                    }
+                ]
+            },
+            "Pick_CreateSchedulerAndTargets.Exclude_keyofCreateSchedulerAndTargets.savedChartUuid-or-dashboardUuid-or-savedSqlUuid-or-createdBy__": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "projectUuid": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "cron": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "format": {
+                        "$ref": "#/components/schemas/SchedulerFormat"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "projectSchedulerTimezone": {
+                        "type": "string"
+                    },
+                    "options": {
+                        "$ref": "#/components/schemas/SchedulerOptions"
+                    },
+                    "thresholds": {
+                        "items": {
+                            "$ref": "#/components/schemas/ThresholdOptions"
+                        },
+                        "type": "array"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "notificationFrequency": {
+                        "$ref": "#/components/schemas/NotificationFrequency"
+                    },
+                    "includeLinks": {
+                        "type": "boolean"
+                    },
+                    "projectName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "targets": {
+                        "items": {
+                            "$ref": "#/components/schemas/CreateSchedulerTarget"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": [
+                    "name",
+                    "cron",
+                    "format",
+                    "options",
+                    "enabled",
+                    "includeLinks",
+                    "targets"
+                ],
+                "type": "object",
+                "description": "From T, pick a set of properties whose keys are in the union K"
+            },
+            "Omit_CreateSchedulerAndTargets.savedChartUuid-or-dashboardUuid-or-savedSqlUuid-or-createdBy_": {
+                "$ref": "#/components/schemas/Pick_CreateSchedulerAndTargets.Exclude_keyofCreateSchedulerAndTargets.savedChartUuid-or-dashboardUuid-or-savedSqlUuid-or-createdBy__",
+                "description": "Construct a type with the properties of T except for those in type K."
+            },
+            "CreateSchedulerAndTargetsWithoutIds": {
+                "$ref": "#/components/schemas/Omit_CreateSchedulerAndTargets.savedChartUuid-or-dashboardUuid-or-savedSqlUuid-or-createdBy_"
+            },
             "SpotlightTableColumns": {
                 "enum": [
                     "label",
@@ -16213,6 +17532,14 @@
                     },
                     {
                         "properties": {
+                            "verification": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/ContentVerificationInfo"
+                                    }
+                                ],
+                                "nullable": true
+                            },
                             "validationErrors": {
                                 "items": {
                                     "$ref": "#/components/schemas/ValidationSummary"
@@ -16220,6 +17547,7 @@
                                 "type": "array"
                             }
                         },
+                        "required": ["verification"],
                         "type": "object"
                     }
                 ]
@@ -16299,6 +17627,14 @@
                     },
                     {
                         "properties": {
+                            "verification": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/ContentVerificationInfo"
+                                    }
+                                ],
+                                "nullable": true
+                            },
                             "validationErrors": {
                                 "items": {
                                     "$ref": "#/components/schemas/ValidationSummary"
@@ -16306,6 +17642,7 @@
                                 "type": "array"
                             }
                         },
+                        "required": ["verification"],
                         "type": "object"
                     }
                 ]
@@ -16909,569 +18246,6 @@
                 "$ref": "#/components/schemas/Pick_ShareUrl.path-or-params_",
                 "description": "Contains the detail of a full URL to generate a short URL id"
             },
-            "SchedulerFormat": {
-                "enum": ["csv", "xlsx", "image", "gsheets"],
-                "type": "string"
-            },
-            "SchedulerCsvOptions": {
-                "properties": {
-                    "asAttachment": {
-                        "type": "boolean"
-                    },
-                    "limit": {
-                        "anyOf": [
-                            {
-                                "type": "number",
-                                "format": "double"
-                            },
-                            {
-                                "type": "string",
-                                "enum": ["table", "all"]
-                            }
-                        ]
-                    },
-                    "formatted": {
-                        "type": "boolean"
-                    }
-                },
-                "required": ["limit", "formatted"],
-                "type": "object"
-            },
-            "SchedulerImageOptions": {
-                "properties": {
-                    "withPdf": {
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "SchedulerGsheetsOptions": {
-                "properties": {
-                    "tabName": {
-                        "type": "string"
-                    },
-                    "url": {
-                        "type": "string"
-                    },
-                    "gdriveOrganizationName": {
-                        "type": "string"
-                    },
-                    "gdriveName": {
-                        "type": "string"
-                    },
-                    "gdriveId": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "url",
-                    "gdriveOrganizationName",
-                    "gdriveName",
-                    "gdriveId"
-                ],
-                "type": "object"
-            },
-            "SchedulerOptions": {
-                "anyOf": [
-                    {
-                        "$ref": "#/components/schemas/SchedulerCsvOptions"
-                    },
-                    {
-                        "$ref": "#/components/schemas/SchedulerImageOptions"
-                    },
-                    {
-                        "$ref": "#/components/schemas/SchedulerGsheetsOptions"
-                    }
-                ]
-            },
-            "ThresholdOperator": {
-                "enum": [
-                    "greaterThan",
-                    "lessThan",
-                    "increasedBy",
-                    "decreasedBy"
-                ],
-                "type": "string"
-            },
-            "ThresholdOptions": {
-                "properties": {
-                    "value": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "fieldId": {
-                        "type": "string"
-                    },
-                    "operator": {
-                        "$ref": "#/components/schemas/ThresholdOperator"
-                    }
-                },
-                "required": ["value", "fieldId", "operator"],
-                "type": "object"
-            },
-            "NotificationFrequency": {
-                "enum": ["always", "once"],
-                "type": "string"
-            },
-            "SchedulerBase": {
-                "properties": {
-                    "projectName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "projectUuid": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "includeLinks": {
-                        "type": "boolean"
-                    },
-                    "notificationFrequency": {
-                        "$ref": "#/components/schemas/NotificationFrequency"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "thresholds": {
-                        "items": {
-                            "$ref": "#/components/schemas/ThresholdOptions"
-                        },
-                        "type": "array"
-                    },
-                    "options": {
-                        "$ref": "#/components/schemas/SchedulerOptions"
-                    },
-                    "dashboardName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "dashboardUuid": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "savedChartName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "savedChartUuid": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "projectSchedulerTimezone": {
-                        "type": "string"
-                    },
-                    "timezone": {
-                        "type": "string"
-                    },
-                    "cron": {
-                        "type": "string"
-                    },
-                    "format": {
-                        "$ref": "#/components/schemas/SchedulerFormat"
-                    },
-                    "createdByName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "createdBy": {
-                        "type": "string"
-                    },
-                    "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "message": {
-                        "type": "string"
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "schedulerUuid": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "includeLinks",
-                    "enabled",
-                    "options",
-                    "dashboardName",
-                    "dashboardUuid",
-                    "savedChartName",
-                    "savedChartUuid",
-                    "cron",
-                    "format",
-                    "createdByName",
-                    "createdBy",
-                    "updatedAt",
-                    "createdAt",
-                    "name",
-                    "schedulerUuid"
-                ],
-                "type": "object"
-            },
-            "ChartScheduler": {
-                "allOf": [
-                    {
-                        "$ref": "#/components/schemas/SchedulerBase"
-                    },
-                    {
-                        "properties": {
-                            "dashboardUuid": {
-                                "type": "number",
-                                "enum": [null],
-                                "nullable": true
-                            },
-                            "savedChartUuid": {
-                                "type": "string"
-                            }
-                        },
-                        "required": ["dashboardUuid", "savedChartUuid"],
-                        "type": "object"
-                    }
-                ]
-            },
-            "DashboardScheduler": {
-                "allOf": [
-                    {
-                        "$ref": "#/components/schemas/SchedulerBase"
-                    },
-                    {
-                        "properties": {
-                            "selectedTabs": {
-                                "items": {
-                                    "type": "string"
-                                },
-                                "type": "array",
-                                "nullable": true
-                            },
-                            "customViewportWidth": {
-                                "type": "number",
-                                "format": "double"
-                            },
-                            "parameters": {
-                                "$ref": "#/components/schemas/ParametersValuesMap"
-                            },
-                            "filters": {
-                                "items": {
-                                    "$ref": "#/components/schemas/DashboardFilterRule"
-                                },
-                                "type": "array"
-                            },
-                            "dashboardUuid": {
-                                "type": "string"
-                            },
-                            "savedChartUuid": {
-                                "type": "number",
-                                "enum": [null],
-                                "nullable": true
-                            }
-                        },
-                        "required": [
-                            "selectedTabs",
-                            "dashboardUuid",
-                            "savedChartUuid"
-                        ],
-                        "type": "object"
-                    }
-                ]
-            },
-            "Scheduler": {
-                "anyOf": [
-                    {
-                        "$ref": "#/components/schemas/ChartScheduler"
-                    },
-                    {
-                        "$ref": "#/components/schemas/DashboardScheduler"
-                    }
-                ]
-            },
-            "SchedulerSlackTarget": {
-                "properties": {
-                    "channel": {
-                        "type": "string"
-                    },
-                    "schedulerUuid": {
-                        "type": "string"
-                    },
-                    "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "schedulerSlackTargetUuid": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "channel",
-                    "schedulerUuid",
-                    "updatedAt",
-                    "createdAt",
-                    "schedulerSlackTargetUuid"
-                ],
-                "type": "object"
-            },
-            "SchedulerEmailTarget": {
-                "properties": {
-                    "recipient": {
-                        "type": "string"
-                    },
-                    "schedulerUuid": {
-                        "type": "string"
-                    },
-                    "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "schedulerEmailTargetUuid": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "recipient",
-                    "schedulerUuid",
-                    "updatedAt",
-                    "createdAt",
-                    "schedulerEmailTargetUuid"
-                ],
-                "type": "object"
-            },
-            "SchedulerMsTeamsTarget": {
-                "properties": {
-                    "webhook": {
-                        "type": "string"
-                    },
-                    "schedulerUuid": {
-                        "type": "string"
-                    },
-                    "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "schedulerMsTeamsTargetUuid": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "webhook",
-                    "schedulerUuid",
-                    "updatedAt",
-                    "createdAt",
-                    "schedulerMsTeamsTargetUuid"
-                ],
-                "type": "object"
-            },
-            "SchedulerGoogleChatTarget": {
-                "properties": {
-                    "googleChatWebhook": {
-                        "type": "string"
-                    },
-                    "schedulerUuid": {
-                        "type": "string"
-                    },
-                    "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "schedulerGoogleChatTargetUuid": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "googleChatWebhook",
-                    "schedulerUuid",
-                    "updatedAt",
-                    "createdAt",
-                    "schedulerGoogleChatTargetUuid"
-                ],
-                "type": "object"
-            },
-            "SchedulerJobStatus": {
-                "enum": ["scheduled", "started", "completed", "error"],
-                "type": "string"
-            },
-            "SchedulerRunStatus": {
-                "enum": [
-                    "completed",
-                    "partial_failure",
-                    "failed",
-                    "running",
-                    "scheduled"
-                ],
-                "type": "string"
-            },
-            "Record_string.AnyType_": {
-                "properties": {},
-                "additionalProperties": {},
-                "type": "object",
-                "description": "Construct a type with a set of properties K of type T"
-            },
-            "LogCounts": {
-                "properties": {
-                    "error": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "completed": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "started": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "scheduled": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "total": {
-                        "type": "number",
-                        "format": "double"
-                    }
-                },
-                "required": [
-                    "error",
-                    "completed",
-                    "started",
-                    "scheduled",
-                    "total"
-                ],
-                "type": "object"
-            },
-            "SchedulerRun": {
-                "properties": {
-                    "format": {
-                        "$ref": "#/components/schemas/SchedulerFormat"
-                    },
-                    "createdByUserName": {
-                        "type": "string"
-                    },
-                    "createdByUserUuid": {
-                        "type": "string"
-                    },
-                    "resourceName": {
-                        "type": "string"
-                    },
-                    "resourceUuid": {
-                        "type": "string"
-                    },
-                    "resourceType": {
-                        "type": "string",
-                        "enum": ["chart", "dashboard"]
-                    },
-                    "logCounts": {
-                        "$ref": "#/components/schemas/LogCounts"
-                    },
-                    "details": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/Record_string.AnyType_"
-                            }
-                        ],
-                        "nullable": true
-                    },
-                    "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "runStatus": {
-                        "$ref": "#/components/schemas/SchedulerRunStatus"
-                    },
-                    "status": {
-                        "$ref": "#/components/schemas/SchedulerJobStatus"
-                    },
-                    "scheduledTime": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "schedulerName": {
-                        "type": "string"
-                    },
-                    "schedulerUuid": {
-                        "type": "string"
-                    },
-                    "runId": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "format",
-                    "createdByUserName",
-                    "createdByUserUuid",
-                    "resourceName",
-                    "resourceUuid",
-                    "resourceType",
-                    "logCounts",
-                    "details",
-                    "createdAt",
-                    "runStatus",
-                    "status",
-                    "scheduledTime",
-                    "schedulerName",
-                    "schedulerUuid",
-                    "runId"
-                ],
-                "type": "object"
-            },
-            "SchedulerAndTargets": {
-                "allOf": [
-                    {
-                        "$ref": "#/components/schemas/Scheduler"
-                    },
-                    {
-                        "properties": {
-                            "latestRun": {
-                                "allOf": [
-                                    {
-                                        "$ref": "#/components/schemas/SchedulerRun"
-                                    }
-                                ],
-                                "nullable": true
-                            },
-                            "targets": {
-                                "items": {
-                                    "anyOf": [
-                                        {
-                                            "$ref": "#/components/schemas/SchedulerSlackTarget"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SchedulerEmailTarget"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SchedulerMsTeamsTarget"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SchedulerGoogleChatTarget"
-                                        }
-                                    ]
-                                },
-                                "type": "array"
-                            }
-                        },
-                        "required": ["targets"],
-                        "type": "object"
-                    }
-                ]
-            },
             "SchedulerTaskName": {
                 "type": "string",
                 "enum": [
@@ -17913,8 +18687,7 @@
                         "type": "string"
                     },
                     "resourceType": {
-                        "type": "string",
-                        "enum": ["chart", "dashboard"]
+                        "$ref": "#/components/schemas/SchedulerResourceType"
                     },
                     "logs": {
                         "items": {
@@ -18339,6 +19112,32 @@
                     }
                 },
                 "required": ["results", "status"],
+                "type": "object"
+            },
+            "ApiContentVerificationResponse": {
+                "properties": {
+                    "results": {
+                        "$ref": "#/components/schemas/ContentVerificationInfo"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
+                "type": "object"
+            },
+            "ApiContentVerificationDeleteResponse": {
+                "properties": {
+                    "results": {},
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["status"],
                 "type": "object"
             },
             "RenameType": {
@@ -19328,7 +20127,8 @@
             "CreateDashboardTileBase": {
                 "properties": {
                     "tabUuid": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     },
                     "w": {
                         "type": "number",
@@ -19866,6 +20666,10 @@
                         "format": "double",
                         "description": "Maximum number of rows to return"
                     },
+                    "timezone": {
+                        "type": "string",
+                        "description": "Timezone for date/time values (e.g., 'America/Los_Angeles', 'UTC')"
+                    },
                     "exploreName": {
                         "type": "string",
                         "description": "The name of the explore to query"
@@ -19919,10 +20723,6 @@
                     "dimensionOverrides": {
                         "$ref": "#/components/schemas/DimensionOverrides",
                         "description": "Override formatting options for existing dimensions"
-                    },
-                    "timezone": {
-                        "type": "string",
-                        "description": "Timezone for date/time values (e.g., 'America/Los_Angeles', 'UTC')"
                     },
                     "pivotDimensions": {
                         "items": {
@@ -20071,6 +20871,10 @@
                 },
                 "type": "object"
             },
+            "ContentAsCodeType.CHART": {
+                "enum": ["chart"],
+                "type": "string"
+            },
             "ChartAsCode": {
                 "allOf": [
                     {
@@ -20078,6 +20882,15 @@
                     },
                     {
                         "properties": {
+                            "verification": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/ContentVerificationInfo"
+                                    }
+                                ],
+                                "nullable": true,
+                                "description": "Verification status of this chart. Read-only; ignored on upload."
+                            },
                             "downloadedAt": {
                                 "type": "string",
                                 "format": "date-time",
@@ -20086,6 +20899,10 @@
                             "spaceSlug": {
                                 "type": "string",
                                 "description": "Slug of the space containing this chart"
+                            },
+                            "contentType": {
+                                "$ref": "#/components/schemas/ContentAsCodeType.CHART",
+                                "description": "Content type discriminator"
                             },
                             "version": {
                                 "type": "number",
@@ -20136,22 +20953,22 @@
                     }
                 ]
             },
-            "PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined__._recurseIntoArrays-true__": {
+            "PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined--description_63_-string-or-undefined__._recurseIntoArrays-true__": {
                 "properties": {},
                 "type": "object",
                 "description": "Same as `PartialDeep`, but accepts only `object`s as inputs. Internal helper for `PartialDeep`."
             },
-            "PartialObjectDeep__chart_58___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined___._recurseIntoArrays-true__": {
+            "PartialObjectDeep__chart_58___91_x-string_93__58__name_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined--description_63_-string-or-undefined___._recurseIntoArrays-true__": {
                 "properties": {
                     "chart": {
-                        "$ref": "#/components/schemas/PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined__._recurseIntoArrays-true__"
+                        "$ref": "#/components/schemas/PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined--description_63_-string-or-undefined__._recurseIntoArrays-true__"
                     }
                 },
                 "type": "object",
                 "description": "Same as `PartialDeep`, but accepts only `object`s as inputs. Internal helper for `PartialDeep`."
             },
             "PartialDeep_ChartAsCodeLanguageMap._recurseIntoArrays-true__": {
-                "$ref": "#/components/schemas/PartialObjectDeep__chart_58___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined___._recurseIntoArrays-true__",
+                "$ref": "#/components/schemas/PartialObjectDeep__chart_58___91_x-string_93__58__name_63_-string-or-undefined--chartConfig_63__58__type-ChartType.CARTESIAN--config_63__58__eChartsConfig_58__series_63__58__name_63_-string-or-undefined--markLine_63__58__data_58__name_63_-string-or-undefined_-Array_-or-undefined_-Array-or-undefined--xAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined--yAxis_63__58__name_63_-string-or-undefined_-Array-or-undefined__-or-undefined_-or-_type-ChartType.PIE--config_63__58__groupLabelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.FUNNEL--config_63__58__labelOverrides_63_-Record_string.string_-or-undefined_-or-undefined_-or-_type-ChartType.BIG_NUMBER--config_63__58__label_63_-string-or-undefined--comparisonLabel_63_-string-or-undefined--comparisonField_63_-string-or-undefined_-or-undefined_-or-_type-ChartType.TABLE--config_63__58__columns_63_-Record_string._name-string__-or-undefined_-or-undefined_-or-_type-ChartType.CUSTOM--config_63__58__spec_63_-Record_string.unknown_-or-undefined_-or-undefined_-or-undefined--description_63_-string-or-undefined___._recurseIntoArrays-true__",
                 "description": "Create a type from another type with all keys and nested keys set to optional.\n\nUse-cases:\n- Merging a default settings/config object with another object, the second object would be a deep partial of the default object.\n- Mocking and testing complex entities, where populating an entire object with its keys would be redundant in terms of the mock or test."
             },
             "ApiChartAsCodeListResponse": {
@@ -20244,7 +21061,8 @@
                         "format": "double"
                     },
                     "tabUuid": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": ["type", "x", "y", "h", "w"],
@@ -20343,6 +21161,10 @@
                     }
                 ]
             },
+            "ContentAsCodeType.DASHBOARD": {
+                "enum": ["dashboard"],
+                "type": "string"
+            },
             "Pick_DashboardFilterRule.Exclude_keyofDashboardFilterRule.id__": {
                 "properties": {
                     "label": {
@@ -20394,6 +21216,15 @@
                     },
                     {
                         "properties": {
+                            "verification": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/ContentVerificationInfo"
+                                    }
+                                ],
+                                "nullable": true,
+                                "description": "Verification status of this dashboard. Read-only; ignored on upload."
+                            },
                             "filters": {
                                 "properties": {
                                     "tableCalculations": {
@@ -20424,6 +21255,9 @@
                             "spaceSlug": {
                                 "type": "string"
                             },
+                            "contentType": {
+                                "$ref": "#/components/schemas/ContentAsCodeType.DASHBOARD"
+                            },
                             "version": {
                                 "type": "number",
                                 "format": "double"
@@ -20445,22 +21279,22 @@
                     }
                 ]
             },
-            "PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__chartName-string--title-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined__._recurseIntoArrays-true__": {
+            "PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__title-string--chartName-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined--description_63_-string-or-undefined__._recurseIntoArrays-true__": {
                 "properties": {},
                 "type": "object",
                 "description": "Same as `PartialDeep`, but accepts only `object`s as inputs. Internal helper for `PartialDeep`."
             },
-            "PartialObjectDeep__dashboard_58___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__chartName-string--title-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined___._recurseIntoArrays-true__": {
+            "PartialObjectDeep__dashboard_58___91_x-string_93__58__name_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__title-string--chartName-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined--description_63_-string-or-undefined___._recurseIntoArrays-true__": {
                 "properties": {
                     "dashboard": {
-                        "$ref": "#/components/schemas/PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__chartName-string--title-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined__._recurseIntoArrays-true__"
+                        "$ref": "#/components/schemas/PartialObjectDeep___91_x-string_93__58__name_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__title-string--chartName-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined--description_63_-string-or-undefined__._recurseIntoArrays-true__"
                     }
                 },
                 "type": "object",
                 "description": "Same as `PartialDeep`, but accepts only `object`s as inputs. Internal helper for `PartialDeep`."
             },
             "PartialDeep_DashboardAsCodeLanguageMap._recurseIntoArrays-true__": {
-                "$ref": "#/components/schemas/PartialObjectDeep__dashboard_58___91_x-string_93__58__name_63_-string-or-undefined--description_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__chartName-string--title-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined___._recurseIntoArrays-true__",
+                "$ref": "#/components/schemas/PartialObjectDeep__dashboard_58___91_x-string_93__58__name_63_-string-or-undefined--tiles_63__58__40__type-DashboardTileTypes.SAVED_CHART-or-DashboardTileTypes.SQL_CHART--properties_58__title-string--chartName-string__-or-_type-DashboardTileTypes.MARKDOWN--properties_58__title-string--content-string__-or-_type-DashboardTileTypes.LOOM--properties_58__title-string__-or-_type-DashboardTileTypes.HEADING--properties_58__text-string___41_-Array-or-undefined--description_63_-string-or-undefined___._recurseIntoArrays-true__",
                 "description": "Create a type from another type with all keys and nested keys set to optional.\n\nUse-cases:\n- Merging a default settings/config object with another object, the second object would be a deep partial of the default object.\n- Mocking and testing complex entities, where populating an entire object with its keys would be redundant in terms of the mock or test."
             },
             "ApiDashboardAsCodeListResponse": {
@@ -20549,6 +21383,15 @@
                         "type": "string",
                         "description": "Unique identifier slug for this chart"
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true,
+                        "description": "Verification status of this chart. Read-only; ignored on upload."
+                    },
                     "tableName": {
                         "type": "string",
                         "description": "The explore/table name this chart queries from"
@@ -20598,6 +21441,10 @@
                     "dashboardSlug": {
                         "type": "string",
                         "description": "Slug of the dashboard this chart belongs to (if any)"
+                    },
+                    "contentType": {
+                        "$ref": "#/components/schemas/ContentAsCodeType.CHART",
+                        "description": "Content type discriminator"
                     },
                     "spaceSlug": {
                         "type": "string",
@@ -20679,6 +21526,10 @@
                 "type": "object",
                 "description": "From T, pick a set of properties whose keys are in the union K"
             },
+            "ContentAsCodeType.SQL_CHART": {
+                "enum": ["sql_chart"],
+                "type": "string"
+            },
             "SqlChartAsCode": {
                 "allOf": [
                     {
@@ -20696,6 +21547,9 @@
                             },
                             "spaceSlug": {
                                 "type": "string"
+                            },
+                            "contentType": {
+                                "$ref": "#/components/schemas/ContentAsCodeType.SQL_CHART"
                             },
                             "version": {
                                 "type": "number",
@@ -20783,6 +21637,9 @@
                     "slug": {
                         "type": "string"
                     },
+                    "contentType": {
+                        "$ref": "#/components/schemas/ContentAsCodeType.SQL_CHART"
+                    },
                     "spaceSlug": {
                         "type": "string"
                     },
@@ -20844,6 +21701,15 @@
                     "slug": {
                         "type": "string"
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true,
+                        "description": "Verification status of this dashboard. Read-only; ignored on upload."
+                    },
                     "filters": {
                         "properties": {
                             "tableCalculations": {
@@ -20875,6 +21741,9 @@
                     },
                     "config": {
                         "$ref": "#/components/schemas/DashboardConfig"
+                    },
+                    "contentType": {
+                        "$ref": "#/components/schemas/ContentAsCodeType.DASHBOARD"
                     },
                     "spaceSlug": {
                         "type": "string"
@@ -20928,6 +21797,79 @@
                         },
                         "required": ["jobIds"],
                         "type": "object"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
+                "type": "object"
+            },
+            "ContentType": {
+                "enum": ["chart", "dashboard", "space"],
+                "type": "string"
+            },
+            "VerifiedContentListItem": {
+                "properties": {
+                    "verifiedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "verifiedBy": {
+                        "properties": {
+                            "lastName": {
+                                "type": "string"
+                            },
+                            "firstName": {
+                                "type": "string"
+                            },
+                            "userUuid": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["lastName", "firstName", "userUuid"],
+                        "type": "object"
+                    },
+                    "spaceName": {
+                        "type": "string"
+                    },
+                    "spaceUuid": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "contentUuid": {
+                        "type": "string"
+                    },
+                    "contentType": {
+                        "$ref": "#/components/schemas/ContentType"
+                    },
+                    "uuid": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "verifiedAt",
+                    "verifiedBy",
+                    "spaceName",
+                    "spaceUuid",
+                    "name",
+                    "contentUuid",
+                    "contentType",
+                    "uuid"
+                ],
+                "type": "object"
+            },
+            "ApiVerifiedContentListResponse": {
+                "properties": {
+                    "results": {
+                        "items": {
+                            "$ref": "#/components/schemas/VerifiedContentListItem"
+                        },
+                        "type": "array"
                     },
                     "status": {
                         "type": "string",
@@ -21280,7 +22222,7 @@
                 "enum": ["dashboard"],
                 "type": "string"
             },
-            "Pick_DashboardBasicDetails.uuid-or-spaceUuid-or-description-or-name-or-views-or-firstViewedAt-or-pinnedListUuid-or-pinnedListOrder-or-updatedAt-or-updatedByUser-or-validationErrors_": {
+            "Pick_DashboardBasicDetails.uuid-or-spaceUuid-or-description-or-name-or-views-or-firstViewedAt-or-pinnedListUuid-or-pinnedListOrder-or-updatedAt-or-updatedByUser-or-validationErrors-or-verification_": {
                 "properties": {
                     "description": {
                         "type": "string"
@@ -21305,6 +22247,14 @@
                     "pinnedListOrder": {
                         "type": "number",
                         "format": "double",
+                        "nullable": true
+                    },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
                         "nullable": true
                     },
                     "updatedByUser": {
@@ -21340,6 +22290,7 @@
                     "spaceUuid",
                     "pinnedListUuid",
                     "pinnedListOrder",
+                    "verification",
                     "views",
                     "firstViewedAt"
                 ],
@@ -21351,7 +22302,8 @@
                     "mostPopular",
                     "recentlyUpdated",
                     "pinned",
-                    "favorites"
+                    "favorites",
+                    "verified"
                 ],
                 "type": "string"
             },
@@ -21361,7 +22313,7 @@
                         "$ref": "#/components/schemas/ResourceItemCategory"
                     },
                     "data": {
-                        "$ref": "#/components/schemas/Pick_DashboardBasicDetails.uuid-or-spaceUuid-or-description-or-name-or-views-or-firstViewedAt-or-pinnedListUuid-or-pinnedListOrder-or-updatedAt-or-updatedByUser-or-validationErrors_"
+                        "$ref": "#/components/schemas/Pick_DashboardBasicDetails.uuid-or-spaceUuid-or-description-or-name-or-views-or-firstViewedAt-or-pinnedListUuid-or-pinnedListOrder-or-updatedAt-or-updatedByUser-or-validationErrors-or-verification_"
                     },
                     "type": {
                         "$ref": "#/components/schemas/ResourceViewItemType.DASHBOARD"
@@ -21374,7 +22326,7 @@
                 "enum": ["chart"],
                 "type": "string"
             },
-            "Pick_SpaceQuery.uuid-or-name-or-chartType-or-chartKind-or-firstViewedAt-or-views-or-pinnedListUuid-or-pinnedListOrder-or-spaceUuid-or-description-or-updatedAt-or-updatedByUser-or-validationErrors-or-slug_": {
+            "Pick_SpaceQuery.uuid-or-name-or-chartType-or-chartKind-or-firstViewedAt-or-views-or-pinnedListUuid-or-pinnedListOrder-or-spaceUuid-or-description-or-updatedAt-or-updatedByUser-or-validationErrors-or-verification-or-slug_": {
                 "properties": {
                     "description": {
                         "type": "string",
@@ -21407,6 +22359,14 @@
                     "slug": {
                         "type": "string",
                         "description": "Unique identifier slug for this chart"
+                    },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
                     },
                     "updatedByUser": {
                         "$ref": "#/components/schemas/UpdatedByUser"
@@ -21448,6 +22408,7 @@
                     "pinnedListUuid",
                     "pinnedListOrder",
                     "slug",
+                    "verification",
                     "views",
                     "firstViewedAt"
                 ],
@@ -21462,7 +22423,7 @@
                     "data": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/Pick_SpaceQuery.uuid-or-name-or-chartType-or-chartKind-or-firstViewedAt-or-views-or-pinnedListUuid-or-pinnedListOrder-or-spaceUuid-or-description-or-updatedAt-or-updatedByUser-or-validationErrors-or-slug_"
+                                "$ref": "#/components/schemas/Pick_SpaceQuery.uuid-or-name-or-chartType-or-chartKind-or-firstViewedAt-or-views-or-pinnedListUuid-or-pinnedListOrder-or-spaceUuid-or-description-or-updatedAt-or-updatedByUser-or-validationErrors-or-verification-or-slug_"
                             },
                             {
                                 "properties": {
@@ -23613,10 +24574,6 @@
                 "required": ["results", "status"],
                 "type": "object"
             },
-            "ContentType": {
-                "enum": ["chart", "dashboard", "space"],
-                "type": "string"
-            },
             "ToggleFavoriteResponse": {
                 "properties": {
                     "contentUuid": {
@@ -24010,6 +24967,74 @@
                 "properties": {
                     "results": {
                         "$ref": "#/components/schemas/DashboardHistory"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
+                "type": "object"
+            },
+            "ChartVersionDifference": {
+                "properties": {
+                    "selectedVersion": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ChartVersionSummary"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "currentVersion": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ChartVersionSummary"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "chartName": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "chartUuid": {
+                        "type": "string"
+                    },
+                    "tileUuid": {
+                        "type": "string"
+                    }
+                },
+                "required": ["chartName", "chartUuid", "tileUuid"],
+                "type": "object"
+            },
+            "DashboardVersion": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/DashboardVersionSummary"
+                    },
+                    {
+                        "properties": {
+                            "chartVersionDifferences": {
+                                "items": {
+                                    "$ref": "#/components/schemas/ChartVersionDifference"
+                                },
+                                "type": "array"
+                            },
+                            "dashboard": {
+                                "$ref": "#/components/schemas/Dashboard"
+                            }
+                        },
+                        "required": ["dashboard"],
+                        "type": "object"
+                    }
+                ]
+            },
+            "ApiGetDashboardVersionResponse": {
+                "properties": {
+                    "results": {
+                        "$ref": "#/components/schemas/DashboardVersion"
                     },
                     "status": {
                         "type": "string",
@@ -25689,29 +26714,6 @@
                     }
                 ]
             },
-            "ResultColumn": {
-                "properties": {
-                    "type": {
-                        "$ref": "#/components/schemas/DimensionType"
-                    },
-                    "reference": {
-                        "type": "string"
-                    }
-                },
-                "required": ["type", "reference"],
-                "type": "object"
-            },
-            "Record_string.ResultColumn_": {
-                "properties": {},
-                "additionalProperties": {
-                    "$ref": "#/components/schemas/ResultColumn"
-                },
-                "type": "object",
-                "description": "Construct a type with a set of properties K of type T"
-            },
-            "ResultColumns": {
-                "$ref": "#/components/schemas/Record_string.ResultColumn_"
-            },
             "ResultValue": {
                 "properties": {
                     "formatted": {
@@ -25998,6 +27000,7 @@
                     "gsheets",
                     "scheduledGsheetsChart",
                     "scheduledGsheetsDashboard",
+                    "scheduledGsheetsSqlChart",
                     "scheduledChart",
                     "scheduledDashboard",
                     "calculateTotal",
@@ -26016,6 +27019,9 @@
                 "properties": {
                     "parameters": {
                         "$ref": "#/components/schemas/ParametersValuesMap"
+                    },
+                    "usePreAggregateCache": {
+                        "type": "boolean"
                     },
                     "invalidateCache": {
                         "type": "boolean"
@@ -26042,6 +27048,9 @@
                             "dimensions": {}
                         },
                         "type": "object"
+                    },
+                    "timezone": {
+                        "type": "string"
                     },
                     "exploreName": {
                         "type": "string"
@@ -26087,9 +27096,6 @@
                     },
                     "dimensionOverrides": {
                         "$ref": "#/components/schemas/DimensionOverrides"
-                    },
-                    "timezone": {
-                        "type": "string"
                     },
                     "pivotDimensions": {
                         "items": {
@@ -26724,338 +27730,6 @@
                     }
                 ]
             },
-            "PreAggregateDailyStatResult": {
-                "properties": {
-                    "updatedAt": {
-                        "type": "string"
-                    },
-                    "preAggregateName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "missReason": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "missCount": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "hitCount": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "queryContext": {
-                        "type": "string"
-                    },
-                    "dashboardName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "dashboardUuid": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "chartName": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "chartUuid": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "date": {
-                        "type": "string"
-                    },
-                    "exploreName": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "updatedAt",
-                    "preAggregateName",
-                    "missReason",
-                    "missCount",
-                    "hitCount",
-                    "queryContext",
-                    "dashboardName",
-                    "dashboardUuid",
-                    "chartName",
-                    "chartUuid",
-                    "date",
-                    "exploreName"
-                ],
-                "type": "object"
-            },
-            "ApiPreAggregateStatsResults": {
-                "properties": {
-                    "stats": {
-                        "items": {
-                            "$ref": "#/components/schemas/PreAggregateDailyStatResult"
-                        },
-                        "type": "array"
-                    }
-                },
-                "required": ["stats"],
-                "type": "object"
-            },
-            "KnexPaginatedData_ApiPreAggregateStatsResults_": {
-                "properties": {
-                    "pagination": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/KnexPaginateArgs"
-                            },
-                            {
-                                "properties": {
-                                    "totalResults": {
-                                        "type": "number",
-                                        "format": "double"
-                                    },
-                                    "totalPageCount": {
-                                        "type": "number",
-                                        "format": "double"
-                                    }
-                                },
-                                "required": ["totalResults", "totalPageCount"],
-                                "type": "object"
-                            }
-                        ]
-                    },
-                    "data": {
-                        "$ref": "#/components/schemas/ApiPreAggregateStatsResults"
-                    }
-                },
-                "required": ["data"],
-                "type": "object"
-            },
-            "ApiGetPreAggregateStatsResponse": {
-                "properties": {
-                    "results": {
-                        "$ref": "#/components/schemas/KnexPaginatedData_ApiPreAggregateStatsResults_"
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["ok"],
-                        "nullable": false
-                    }
-                },
-                "required": ["results", "status"],
-                "type": "object"
-            },
-            "PreAggregateMaterializationWarning": {
-                "properties": {
-                    "threshold": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "rowCount": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "message": {
-                        "type": "string"
-                    },
-                    "type": {
-                        "type": "string",
-                        "enum": ["row_count_exceeded"],
-                        "nullable": false
-                    }
-                },
-                "required": ["threshold", "rowCount", "message", "type"],
-                "type": "object"
-            },
-            "PreAggregateMaterializationStatus": {
-                "type": "string",
-                "enum": ["in_progress", "active", "superseded", "failed"]
-            },
-            "PreAggregateMaterializationTrigger": {
-                "type": "string",
-                "enum": ["compile", "cron", "manual", "webhook"]
-            },
-            "PreAggregateMaterializationSummary": {
-                "properties": {
-                    "materialization": {
-                        "properties": {
-                            "trigger": {
-                                "$ref": "#/components/schemas/PreAggregateMaterializationTrigger"
-                            },
-                            "errorMessage": {
-                                "type": "string",
-                                "nullable": true
-                            },
-                            "totalBytes": {
-                                "type": "number",
-                                "format": "double",
-                                "nullable": true
-                            },
-                            "columns": {
-                                "allOf": [
-                                    {
-                                        "$ref": "#/components/schemas/ResultColumns"
-                                    }
-                                ],
-                                "nullable": true
-                            },
-                            "rowCount": {
-                                "type": "number",
-                                "format": "double",
-                                "nullable": true
-                            },
-                            "durationMs": {
-                                "type": "number",
-                                "format": "double",
-                                "nullable": true
-                            },
-                            "materializedAt": {
-                                "type": "string",
-                                "format": "date-time",
-                                "nullable": true
-                            },
-                            "status": {
-                                "$ref": "#/components/schemas/PreAggregateMaterializationStatus"
-                            },
-                            "materializationUuid": {
-                                "type": "string"
-                            }
-                        },
-                        "required": [
-                            "trigger",
-                            "errorMessage",
-                            "totalBytes",
-                            "columns",
-                            "rowCount",
-                            "durationMs",
-                            "materializedAt",
-                            "status",
-                            "materializationUuid"
-                        ],
-                        "type": "object",
-                        "nullable": true
-                    },
-                    "warnings": {
-                        "items": {
-                            "$ref": "#/components/schemas/PreAggregateMaterializationWarning"
-                        },
-                        "type": "array"
-                    },
-                    "definitionError": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "refreshCron": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "granularity": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/TimeFrames"
-                            }
-                        ],
-                        "nullable": true
-                    },
-                    "timeDimension": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "metrics": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array"
-                    },
-                    "dimensions": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array"
-                    },
-                    "sourceExploreName": {
-                        "type": "string"
-                    },
-                    "preAggExploreName": {
-                        "type": "string"
-                    },
-                    "preAggregateName": {
-                        "type": "string"
-                    },
-                    "preAggregateDefinitionUuid": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "materialization",
-                    "warnings",
-                    "definitionError",
-                    "refreshCron",
-                    "granularity",
-                    "timeDimension",
-                    "metrics",
-                    "dimensions",
-                    "sourceExploreName",
-                    "preAggExploreName",
-                    "preAggregateName",
-                    "preAggregateDefinitionUuid"
-                ],
-                "type": "object"
-            },
-            "ApiPreAggregateMaterializationsResults": {
-                "properties": {
-                    "materializations": {
-                        "items": {
-                            "$ref": "#/components/schemas/PreAggregateMaterializationSummary"
-                        },
-                        "type": "array"
-                    }
-                },
-                "required": ["materializations"],
-                "type": "object"
-            },
-            "KnexPaginatedData_ApiPreAggregateMaterializationsResults_": {
-                "properties": {
-                    "pagination": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/KnexPaginateArgs"
-                            },
-                            {
-                                "properties": {
-                                    "totalResults": {
-                                        "type": "number",
-                                        "format": "double"
-                                    },
-                                    "totalPageCount": {
-                                        "type": "number",
-                                        "format": "double"
-                                    }
-                                },
-                                "required": ["totalResults", "totalPageCount"],
-                                "type": "object"
-                            }
-                        ]
-                    },
-                    "data": {
-                        "$ref": "#/components/schemas/ApiPreAggregateMaterializationsResults"
-                    }
-                },
-                "required": ["data"],
-                "type": "object"
-            },
-            "ApiGetPreAggregateMaterializationsResponse": {
-                "properties": {
-                    "results": {
-                        "$ref": "#/components/schemas/KnexPaginatedData_ApiPreAggregateMaterializationsResults_"
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["ok"],
-                        "nullable": false
-                    }
-                },
-                "required": ["results", "status"],
-                "type": "object"
-            },
             "ProjectParameterSummary": {
                 "properties": {
                     "modelName": {
@@ -27362,6 +28036,14 @@
                         "format": "date-time",
                         "nullable": true
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "source": {
                         "$ref": "#/components/schemas/ChartSourceType"
                     },
@@ -27398,6 +28080,7 @@
                     "pinnedList",
                     "views",
                     "firstViewedAt",
+                    "verification",
                     "source",
                     "chartKind",
                     "dashboard"
@@ -27522,6 +28205,14 @@
                         "type": "string",
                         "format": "date-time",
                         "nullable": true
+                    },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -27539,7 +28230,8 @@
                     "space",
                     "pinnedList",
                     "views",
-                    "firstViewedAt"
+                    "firstViewedAt",
+                    "verification"
                 ],
                 "type": "object",
                 "additionalProperties": true
@@ -27666,6 +28358,14 @@
                         "format": "date-time",
                         "nullable": true
                     },
+                    "verification": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ContentVerificationInfo"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "inheritParentPermissions": {
                         "type": "boolean"
                     },
@@ -27711,6 +28411,7 @@
                     "pinnedList",
                     "views",
                     "firstViewedAt",
+                    "verification",
                     "inheritParentPermissions",
                     "dashboardCount",
                     "chartCount",
@@ -28297,6 +28998,57 @@
                 },
                 "required": ["item"],
                 "type": "object"
+            },
+            "KnexPaginatedData_CatalogField-Array_": {
+                "properties": {
+                    "pagination": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/KnexPaginateArgs"
+                            },
+                            {
+                                "properties": {
+                                    "totalResults": {
+                                        "type": "number",
+                                        "format": "double"
+                                    },
+                                    "totalPageCount": {
+                                        "type": "number",
+                                        "format": "double"
+                                    }
+                                },
+                                "required": ["totalResults", "totalPageCount"],
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "data": {
+                        "items": {
+                            "$ref": "#/components/schemas/CatalogField"
+                        },
+                        "type": "array"
+                    }
+                },
+                "required": ["data"],
+                "type": "object"
+            },
+            "ApiPaginatedMetricsWithTimeDimensionResponse": {
+                "properties": {
+                    "results": {
+                        "$ref": "#/components/schemas/KnexPaginatedData_CatalogField-Array_"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["ok"],
+                        "nullable": false
+                    }
+                },
+                "required": ["results", "status"],
+                "type": "object"
+            },
+            "CatalogSortField": {
+                "type": "string",
+                "enum": ["name", "label", "chartUsage", "tableLabel", "owner"]
             }
         },
         "securitySchemes": {
@@ -28315,7 +29067,7 @@
     },
     "info": {
         "title": "Lightdash API",
-        "version": "0.2625.0",
+        "version": "0.2673.0",
         "description": "Open API documentation for all public Lightdash API endpoints. # Authentication Before you get started, you might need to create a Personal Access Token to authenticate via the API. You can create a token by following this guide: https://docs.lightdash.com/references/personal_tokens\n",
         "license": {
             "name": "MIT"
@@ -29713,6 +30465,150 @@
                 "tags": ["Projects"],
                 "security": [],
                 "parameters": []
+            }
+        },
+        "/api/v2/projects/{projectUuid}/pre-aggregates/stats": {
+            "get": {
+                "operationId": "getPreAggregateStats",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiGetPreAggregateStatsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Retrieves aggregated pre-aggregate hit/miss statistics for a project",
+                "summary": "Get pre-aggregate stats",
+                "tags": ["v2", "Pre-Aggregates"],
+                "security": [],
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "projectUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "days",
+                        "required": false,
+                        "schema": {
+                            "format": "double",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "page",
+                        "required": false,
+                        "schema": {
+                            "format": "double",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "pageSize",
+                        "required": false,
+                        "schema": {
+                            "format": "double",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "exploreName",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "queryType",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": ["chart", "dashboard", "explorer"]
+                        }
+                    }
+                ]
+            }
+        },
+        "/api/v2/projects/{projectUuid}/pre-aggregates/materializations": {
+            "get": {
+                "operationId": "getPreAggregateMaterializations",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiGetPreAggregateMaterializationsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Retrieves pre-aggregate definitions with their latest materialization status",
+                "summary": "Get pre-aggregate materializations",
+                "tags": ["v2", "Pre-Aggregates"],
+                "security": [],
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "projectUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "page",
+                        "required": false,
+                        "schema": {
+                            "format": "double",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "pageSize",
+                        "required": false,
+                        "schema": {
+                            "format": "double",
+                            "type": "number"
+                        }
+                    }
+                ]
             }
         },
         "/api/v1/org/warehouse-credentials": {
@@ -32930,6 +33826,137 @@
                 }
             }
         },
+        "/api/v1/projects/{projectUuid}/sqlRunner/saved/{savedSqlUuid}/schedulers": {
+            "get": {
+                "operationId": "getSqlChartSchedulers",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "results": {
+                                            "items": {
+                                                "$ref": "#/components/schemas/SchedulerAndTargets"
+                                            },
+                                            "type": "array"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "enum": ["ok"],
+                                            "nullable": false
+                                        }
+                                    },
+                                    "required": ["results", "status"],
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Get all schedulers for a SQL chart",
+                "summary": "List SQL chart schedulers",
+                "tags": ["SQL runner"],
+                "security": [],
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "projectUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "savedSqlUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "createSqlChartScheduler",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "results": {
+                                            "$ref": "#/components/schemas/SchedulerAndTargets"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "enum": ["ok"],
+                                            "nullable": false
+                                        }
+                                    },
+                                    "required": ["results", "status"],
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Create a scheduler for a SQL chart",
+                "summary": "Create SQL chart scheduler",
+                "tags": ["SQL runner"],
+                "security": [],
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "projectUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "savedSqlUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateSchedulerAndTargetsWithoutIds"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/projects/{projectUuid}/spotlight/table/config": {
             "post": {
                 "operationId": "postSpotlightTableConfig",
@@ -35808,6 +36835,88 @@
                 ]
             }
         },
+        "/api/v1/saved/{chartUuid}/verification": {
+            "post": {
+                "operationId": "verifyChart",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiContentVerificationResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Verify a chart",
+                "summary": "Verify chart",
+                "tags": ["Charts"],
+                "security": [],
+                "parameters": [
+                    {
+                        "description": "The uuid of the chart to verify",
+                        "in": "path",
+                        "name": "chartUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            },
+            "delete": {
+                "operationId": "unverifyChart",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiContentVerificationDeleteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Remove verification from a chart",
+                "summary": "Unverify chart",
+                "tags": ["Charts"],
+                "security": [],
+                "parameters": [
+                    {
+                        "description": "The uuid of the chart to unverify",
+                        "in": "path",
+                        "name": "chartUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            }
+        },
         "/api/v1/projects/{projectUuid}/rename": {
             "post": {
                 "operationId": "rename",
@@ -38311,6 +39420,47 @@
                     {
                         "in": "path",
                         "name": "preAggregateDefinitionName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            }
+        },
+        "/api/v1/projects/{projectUuid}/content-verification": {
+            "get": {
+                "operationId": "listVerifiedContent",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiVerifiedContentListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "List all verified content (charts and dashboards) in a project",
+                "summary": "List verified content",
+                "tags": ["Projects"],
+                "security": [],
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "projectUuid",
                         "required": true,
                         "schema": {
                             "type": "string"
@@ -42154,6 +43304,9 @@
                                     },
                                     {
                                         "properties": {
+                                            "usePreAggregateCache": {
+                                                "type": "boolean"
+                                            },
                                             "pivotConfiguration": {
                                                 "$ref": "#/components/schemas/PivotConfiguration"
                                             },
@@ -42423,6 +43576,57 @@
                 ]
             }
         },
+        "/api/v1/dashboards/{dashboardUuid}/version/{versionUuid}": {
+            "get": {
+                "operationId": "getDashboardVersion",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiGetDashboardVersionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Get specific dashboard version",
+                "summary": "Get dashboard version",
+                "tags": ["Dashboards"],
+                "security": [],
+                "parameters": [
+                    {
+                        "description": "dashboardUuid for the dashboard",
+                        "in": "path",
+                        "name": "dashboardUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "versionUuid for the dashboard version",
+                        "in": "path",
+                        "name": "versionUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            }
+        },
         "/api/v1/dashboards/{dashboardUuid}/rollback/{versionUuid}": {
             "post": {
                 "operationId": "postDashboardVersionRollback",
@@ -42545,6 +43749,88 @@
                 "security": [],
                 "parameters": [
                     {
+                        "in": "path",
+                        "name": "dashboardUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            }
+        },
+        "/api/v1/dashboards/{dashboardUuid}/verification": {
+            "post": {
+                "operationId": "verifyDashboard",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiContentVerificationResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Verify a dashboard",
+                "summary": "Verify dashboard",
+                "tags": ["Dashboards"],
+                "security": [],
+                "parameters": [
+                    {
+                        "description": "The uuid of the dashboard to verify",
+                        "in": "path",
+                        "name": "dashboardUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ]
+            },
+            "delete": {
+                "operationId": "unverifyDashboard",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiContentVerificationDeleteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Remove verification from a dashboard",
+                "summary": "Unverify dashboard",
+                "tags": ["Dashboards"],
+                "security": [],
+                "parameters": [
+                    {
+                        "description": "The uuid of the dashboard to unverify",
                         "in": "path",
                         "name": "dashboardUuid",
                         "required": true,
@@ -46352,150 +47638,6 @@
                 ]
             }
         },
-        "/api/v2/projects/{projectUuid}/pre-aggregates/stats": {
-            "get": {
-                "operationId": "getPreAggregateStats",
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ApiGetPreAggregateStatsResponse"
-                                }
-                            }
-                        }
-                    },
-                    "default": {
-                        "description": "Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ApiErrorPayload"
-                                }
-                            }
-                        }
-                    }
-                },
-                "description": "Retrieves aggregated pre-aggregate hit/miss statistics for a project",
-                "summary": "Get pre-aggregate stats",
-                "tags": ["v2", "Pre-Aggregates"],
-                "security": [],
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "projectUuid",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "days",
-                        "required": false,
-                        "schema": {
-                            "format": "double",
-                            "type": "number"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "page",
-                        "required": false,
-                        "schema": {
-                            "format": "double",
-                            "type": "number"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "pageSize",
-                        "required": false,
-                        "schema": {
-                            "format": "double",
-                            "type": "number"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "exploreName",
-                        "required": false,
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "queryType",
-                        "required": false,
-                        "schema": {
-                            "type": "string",
-                            "enum": ["chart", "dashboard", "explorer"]
-                        }
-                    }
-                ]
-            }
-        },
-        "/api/v2/projects/{projectUuid}/pre-aggregates/materializations": {
-            "get": {
-                "operationId": "getPreAggregateMaterializations",
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ApiGetPreAggregateMaterializationsResponse"
-                                }
-                            }
-                        }
-                    },
-                    "default": {
-                        "description": "Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ApiErrorPayload"
-                                }
-                            }
-                        }
-                    }
-                },
-                "description": "Retrieves pre-aggregate definitions with their latest materialization status",
-                "summary": "Get pre-aggregate materializations",
-                "tags": ["v2", "Pre-Aggregates"],
-                "security": [],
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "projectUuid",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "page",
-                        "required": false,
-                        "schema": {
-                            "format": "double",
-                            "type": "number"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "pageSize",
-                        "required": false,
-                        "schema": {
-                            "format": "double",
-                            "type": "number"
-                        }
-                    }
-                ]
-            }
-        },
         "/api/v2/projects/{projectUuid}/parameters/list": {
             "get": {
                 "operationId": "getProjectParametersList",
@@ -47370,6 +48512,116 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/v2/projects/{projectUuid}/dataCatalog/metrics-with-time-dimensions": {
+            "get": {
+                "operationId": "getPaginatedMetricsWithTimeDimensions",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiPaginatedMetricsWithTimeDimensionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ApiErrorPayload"
+                                }
+                            }
+                        }
+                    }
+                },
+                "description": "Get paginated metrics that have time dimensions available",
+                "summary": "List metrics with time dimensions",
+                "tags": ["v2", "Catalog"],
+                "security": [],
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "projectUuid",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "page",
+                        "required": false,
+                        "schema": {
+                            "default": 1,
+                            "format": "double",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "pageSize",
+                        "required": false,
+                        "schema": {
+                            "default": 50,
+                            "format": "double",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "sort",
+                        "required": false,
+                        "schema": {
+                            "$ref": "#/components/schemas/CatalogSortField"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "order",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": ["asc", "desc"]
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "tableName",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Spotlight category yaml references to filter by (OR mode)",
+                        "in": "query",
+                        "name": "categories",
+                        "required": false,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    {
+                        "description": "dbt tag names to filter by (OR mode)",
+                        "in": "query",
+                        "name": "tags",
+                        "required": false,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ]
             }
         }
     },

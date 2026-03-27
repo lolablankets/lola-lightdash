@@ -2,6 +2,7 @@ import { subject } from '@casl/ability';
 import {
     AbilityAction,
     BulkActionable,
+    ContentType,
     CreateDashboard,
     CreateDashboardWithCharts,
     CreateSavedChart,
@@ -12,10 +13,11 @@ import {
     DashboardTileTypes,
     DashboardVersionedFields,
     ExploreType,
+    FeatureFlags,
     ForbiddenError,
     generateSlug,
+    getSchedulerResourceTypeAndId,
     hasChartsInDashboard,
-    isChartScheduler,
     isDashboardChartTileType,
     isDashboardScheduler,
     isDashboardUnversionedFields,
@@ -35,8 +37,12 @@ import {
     UpdateDashboard,
     UpdateMultipleDashboards,
     type ChartFieldUpdates,
+    type ChartVersionDifference,
+    type ChartVersionSummary,
+    type ContentVerificationInfo,
     type DashboardBasicDetailsWithTileTypes,
     type DashboardHistory,
+    type DashboardVersion,
     type DuplicateDashboardParams,
     type Explore,
     type ExploreError,
@@ -58,6 +64,7 @@ import { logAuditEvent } from '../../logging/winston';
 import { AnalyticsModel } from '../../models/AnalyticsModel';
 import type { CatalogModel } from '../../models/CatalogModel/CatalogModel';
 import { getChartFieldUsageChanges } from '../../models/CatalogModel/utils';
+import { ContentVerificationModel } from '../../models/ContentVerificationModel';
 import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
 import { PinnedListModel } from '../../models/PinnedListModel';
 import type { ProjectModel } from '../../models/ProjectModel/ProjectModel';
@@ -67,6 +74,7 @@ import { SpaceModel } from '../../models/SpaceModel';
 import { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { createTwoColumnTiles } from '../../utils/dashboardTileUtils';
 import { BaseService } from '../BaseService';
+import { FeatureFlagService } from '../FeatureFlag/FeatureFlagService';
 import { SavedChartService } from '../SavedChartsService/SavedChartService';
 import type { SchedulerService } from '../SchedulerService/SchedulerService';
 import type {
@@ -92,6 +100,8 @@ type DashboardServiceArguments = {
     projectModel: ProjectModel;
     catalogModel: CatalogModel;
     spacePermissionService: SpacePermissionService;
+    contentVerificationModel: ContentVerificationModel;
+    featureFlagService: FeatureFlagService;
 };
 
 export class DashboardService
@@ -128,6 +138,10 @@ export class DashboardService
 
     spacePermissionService: SpacePermissionService;
 
+    contentVerificationModel: ContentVerificationModel;
+
+    featureFlagService: FeatureFlagService;
+
     constructor({
         lightdashConfig,
         analytics,
@@ -144,6 +158,8 @@ export class DashboardService
         projectModel,
         catalogModel,
         spacePermissionService,
+        contentVerificationModel,
+        featureFlagService,
     }: DashboardServiceArguments) {
         super();
         this.lightdashConfig = lightdashConfig;
@@ -161,6 +177,119 @@ export class DashboardService
         this.schedulerClient = schedulerClient;
         this.slackClient = slackClient;
         this.spacePermissionService = spacePermissionService;
+        this.contentVerificationModel = contentVerificationModel;
+        this.featureFlagService = featureFlagService;
+    }
+
+    private async assertContentVerificationEnabled(
+        user: Pick<SessionUser, 'userUuid' | 'organizationUuid'>,
+    ): Promise<void> {
+        const flag = await this.featureFlagService.get({
+            user,
+            featureFlagId: FeatureFlags.ContentVerification,
+        });
+        if (!flag.enabled) {
+            throw new ForbiddenError('Content verification is not enabled');
+        }
+    }
+
+    async verifyDashboard(
+        user: SessionUser,
+        dashboardUuid: string,
+    ): Promise<ContentVerificationInfo> {
+        await this.assertContentVerificationEnabled(user);
+        const dashboard =
+            await this.dashboardModel.getByIdOrSlug(dashboardUuid);
+        const { organizationUuid, projectUuid } = dashboard;
+
+        const auditedAbility = new CaslAuditWrapper(user.ability, user, {
+            auditLogger: logAuditEvent,
+        });
+
+        if (
+            auditedAbility.cannot(
+                'manage',
+                subject('ContentVerification', {
+                    organizationUuid,
+                    projectUuid,
+                    uuid: projectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError('Only admins can verify dashboards');
+        }
+
+        await this.contentVerificationModel.verify(
+            ContentType.DASHBOARD,
+            dashboardUuid,
+            projectUuid,
+            user.userUuid,
+        );
+
+        const verification = await this.contentVerificationModel.getByContent(
+            ContentType.DASHBOARD,
+            dashboardUuid,
+        );
+
+        if (!verification) {
+            throw new Error('Failed to verify dashboard');
+        }
+
+        this.analytics.track({
+            event: 'content_verification.created',
+            userId: user.userUuid,
+            properties: {
+                projectId: projectUuid,
+                contentType: ContentType.DASHBOARD,
+                contentId: dashboardUuid,
+            },
+        });
+
+        return verification;
+    }
+
+    async unverifyDashboard(
+        user: SessionUser,
+        dashboardUuid: string,
+    ): Promise<void> {
+        await this.assertContentVerificationEnabled(user);
+        const dashboard =
+            await this.dashboardModel.getByIdOrSlug(dashboardUuid);
+        const { organizationUuid, projectUuid } = dashboard;
+
+        const auditedAbility = new CaslAuditWrapper(user.ability, user, {
+            auditLogger: logAuditEvent,
+        });
+
+        if (
+            auditedAbility.cannot(
+                'manage',
+                subject('ContentVerification', {
+                    organizationUuid,
+                    projectUuid,
+                    uuid: projectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError(
+                'Only admins can remove dashboard verification',
+            );
+        }
+
+        await this.contentVerificationModel.unverify(
+            ContentType.DASHBOARD,
+            dashboardUuid,
+        );
+
+        this.analytics.track({
+            event: 'content_verification.deleted',
+            userId: user.userUuid,
+            properties: {
+                projectId: projectUuid,
+                contentType: ContentType.DASHBOARD,
+                contentId: dashboardUuid,
+            },
+        });
     }
 
     static getCreateEventProperties(
@@ -256,12 +385,14 @@ export class DashboardService
             },
         );
 
-        // Update catalog field usage for the new chart
-        const cachedExplore = await this.projectModel.getExploreFromCache(
-            projectUuid,
-            duplicatedChart.tableName,
-        );
+        // Best effort: the chart has already been duplicated at this point, so
+        // missing explore metadata should not fail the parent dashboard copy.
+        let cachedExplore: Explore | ExploreError | undefined;
         try {
+            cachedExplore = await this.projectModel.getExploreFromCache(
+                projectUuid,
+                duplicatedChart.tableName,
+            );
             await this.updateChartFieldUsage(projectUuid, cachedExplore, {
                 oldChartFields: {
                     metrics: [],
@@ -273,9 +404,13 @@ export class DashboardService
                 },
             });
         } catch (error) {
-            this.logger.error(
-                `Error updating chart field usage for duplicated chart ${duplicatedChart.uuid}`,
-                error,
+            this.logger.warn(
+                `Skipping duplicated chart enrichment for chart ${duplicatedChart.uuid}`,
+                {
+                    error,
+                    projectUuid,
+                    tableName: duplicatedChart.tableName,
+                },
             );
         }
 
@@ -797,6 +932,12 @@ export class DashboardService
             );
         }
 
+        // Auto-remove verification when dashboard is edited
+        await this.contentVerificationModel.unverify(
+            ContentType.DASHBOARD,
+            existingDashboardDao.uuid,
+        );
+
         const updatedNewDashboard = await this.dashboardModel.getByIdOrSlug(
             existingDashboardDao.uuid,
         );
@@ -1047,12 +1188,13 @@ export class DashboardService
             }
         }
 
+        const resolvedUuid = dashboardToDelete.uuid;
         if (this.lightdashConfig.softDelete.enabled) {
-            await this.softDelete(user, dashboardUuid, {
+            await this.softDelete(user, resolvedUuid, {
                 bypassPermissions: true, // perms checked above
             });
         } else {
-            await this.permanentDelete(user, dashboardUuid, {
+            await this.permanentDelete(user, resolvedUuid, {
                 bypassPermissions: true, // perms checked above
             });
         }
@@ -1239,6 +1381,7 @@ export class DashboardService
             createdBy: user.userUuid,
             dashboardUuid,
             savedChartUuid: null,
+            savedSqlUuid: null,
         });
         const createSchedulerData: SchedulerDashboardUpsertEvent = {
             userId: user.userUuid,
@@ -1247,18 +1390,13 @@ export class DashboardService
                 projectId: projectUuid,
                 organizationId: organizationUuid,
                 schedulerId: scheduler.schedulerUuid,
-                resourceType: isChartScheduler(scheduler)
-                    ? 'chart'
-                    : 'dashboard',
+                ...getSchedulerResourceTypeAndId(scheduler),
                 cronExpression: scheduler.cron,
                 format: scheduler.format,
                 cronString: cronstrue.toString(scheduler.cron, {
                     verbose: true,
                     throwExceptionOnParseError: false,
                 }),
-                resourceId: isChartScheduler(scheduler)
-                    ? scheduler.savedChartUuid
-                    : scheduler.dashboardUuid,
                 targets:
                     scheduler.format === SchedulerFormat.GSHEETS
                         ? []
@@ -1437,6 +1575,138 @@ export class DashboardService
         return { history: versions };
     }
 
+    async getVersion(
+        user: SessionUser,
+        dashboardUuid: string,
+        versionUuid: string,
+    ): Promise<DashboardVersion> {
+        const dashboardDao =
+            await this.dashboardModel.getByIdOrSlug(dashboardUuid);
+        const { inheritsFromOrgOrProject, access } =
+            await this.spacePermissionService.getSpaceAccessContext(
+                user.userUuid,
+                dashboardDao.spaceUuid,
+            );
+        if (
+            user.ability.cannot(
+                'view',
+                subject('Dashboard', {
+                    ...dashboardDao,
+                    inheritsFromOrgOrProject,
+                    access,
+                }),
+            )
+        ) {
+            throw new ForbiddenError(
+                "You don't have access to view this dashboard version",
+            );
+        }
+
+        const [versionSummary, dashboard] = await Promise.all([
+            this.dashboardModel.getVersionSummaryByUuid(
+                dashboardUuid,
+                versionUuid,
+            ),
+            this.dashboardModel.getVersionByUuid(dashboardUuid, versionUuid),
+        ]);
+
+        if (!dashboard) {
+            throw new NotFoundError('Dashboard version not found');
+        }
+
+        // Construct a full dashboard object from the version
+        const fullDashboard: Dashboard = {
+            ...dashboardDao,
+            tiles: dashboard.tiles,
+            filters: dashboard.filters,
+            parameters: dashboard.parameters,
+            tabs: dashboard.tabs,
+            config: dashboard.config,
+            updatedAt: dashboard.updatedAt,
+            updatedByUser: dashboard.updatedByUser,
+            inheritsFromOrgOrProject,
+            access,
+        };
+
+        // Check if this is the current version
+        const isCurrentVersion = dashboardDao.versionUuid === versionUuid;
+
+        // Calculate chart version differences only if not the current version
+        const chartVersionDifferences: ChartVersionDifference[] = [];
+
+        if (!isCurrentVersion) {
+            // Get current tiles with saved charts
+            const currentChartTiles = dashboardDao.tiles.filter(
+                (tile) =>
+                    isDashboardChartTileType(tile) &&
+                    tile.properties.savedChartUuid,
+            );
+
+            // Get version tiles with dashboard-owned charts (only these are rolled back)
+            const versionChartTiles = dashboard.tiles.filter(
+                (tile) =>
+                    isDashboardChartTileType(tile) &&
+                    tile.properties.savedChartUuid &&
+                    tile.properties.belongsToDashboard === true,
+            );
+
+            // Compare charts that exist in the version
+            const versionChartDifferencesPromises = versionChartTiles
+                .filter(isDashboardChartTileType)
+                .filter((tile) => tile.properties.savedChartUuid)
+                .map(async (versionTile) => {
+                    const chartUuid = versionTile.properties.savedChartUuid!;
+                    const currentTile = currentChartTiles.find(
+                        (tile) =>
+                            isDashboardChartTileType(tile) &&
+                            tile.properties.savedChartUuid === chartUuid,
+                    );
+
+                    let currentChartVersion: ChartVersionSummary | null = null;
+                    let selectedChartVersion: ChartVersionSummary | null = null;
+
+                    try {
+                        // Get the current (latest) chart version
+                        currentChartVersion =
+                            (await this.savedChartModel.getLatestVersionSummary(
+                                chartUuid,
+                            )) ?? null;
+
+                        // Get the chart version that was active when the dashboard version was created
+                        selectedChartVersion =
+                            (await this.savedChartModel.getVersionSummaryAtTimestamp(
+                                chartUuid,
+                                dashboard.updatedAt,
+                            )) ?? null;
+                    } catch (error) {
+                        // Chart might have been deleted or inaccessible
+                        this.logger.debug(
+                            `Could not fetch chart versions for ${chartUuid}: ${error}`,
+                        );
+                    }
+
+                    return {
+                        tileUuid: versionTile.uuid,
+                        chartUuid,
+                        chartName: versionTile.properties.chartName || null,
+                        currentVersion: currentChartVersion,
+                        selectedVersion: selectedChartVersion,
+                    };
+                });
+
+            const versionChartDifferences = await Promise.all(
+                versionChartDifferencesPromises,
+            );
+            chartVersionDifferences.push(...versionChartDifferences);
+        }
+
+        return {
+            ...versionSummary,
+            dashboard: fullDashboard,
+            chartVersionDifferences,
+        };
+    }
+
     async rollback(
         user: SessionUser,
         dashboardUuid: string,
@@ -1444,6 +1714,15 @@ export class DashboardService
     ): Promise<void> {
         const dashboardDao =
             await this.dashboardModel.getByIdOrSlug(dashboardUuid);
+
+        // Check if trying to rollback to current version
+        if (dashboardDao.versionUuid === versionUuid) {
+            this.logger.info(
+                `Ignoring rollback request - version ${versionUuid} is already the current version for dashboard ${dashboardUuid}`,
+            );
+            return;
+        }
+
         const { inheritsFromOrgOrProject, access } =
             await this.spacePermissionService.getSpaceAccessContext(
                 user.userUuid,
@@ -1473,18 +1752,71 @@ export class DashboardService
             throw new NotFoundError('Dashboard version not found');
         }
 
-        await this.dashboardModel.addVersion(
-            dashboardUuid,
-            {
-                tiles: targetVersion.tiles,
-                filters: targetVersion.filters,
-                parameters: targetVersion.parameters,
-                tabs: targetVersion.tabs,
-                config: targetVersion.config,
-            },
-            user,
-            dashboardDao.projectUuid,
-        );
+        // Rollback dashboard and all owned charts in a single transaction
+        await this.savedChartModel.transaction(async (tx) => {
+            // Rollback dashboard version
+            await this.dashboardModel.addVersion(
+                dashboardUuid,
+                {
+                    tiles: targetVersion.tiles,
+                    filters: targetVersion.filters,
+                    parameters: targetVersion.parameters,
+                    tabs: targetVersion.tabs,
+                    config: targetVersion.config,
+                },
+                user,
+                dashboardDao.projectUuid,
+                tx,
+            );
+
+            // Only rollback charts that belong to the dashboard
+            const uniqueChartUuids = [
+                ...new Set(
+                    targetVersion.tiles
+                        .filter(
+                            (tile) =>
+                                isDashboardChartTileType(tile) &&
+                                tile.properties.savedChartUuid &&
+                                tile.properties.belongsToDashboard === true,
+                        )
+                        .map((tile) =>
+                            isDashboardChartTileType(tile)
+                                ? tile.properties.savedChartUuid!
+                                : '',
+                        )
+                        .filter(Boolean),
+                ),
+            ];
+
+            // Rollback each dashboard-owned chart to its version at the target dashboard version time
+            if (uniqueChartUuids.length > 0) {
+                this.logger.info(
+                    `Rolling back ${uniqueChartUuids.length} dashboard-owned charts`,
+                );
+
+                await Promise.all(
+                    uniqueChartUuids.map(async (chartUuid) => {
+                        const result =
+                            await this.savedChartModel.rollbackToVersionAtTimestamp(
+                                chartUuid,
+                                targetVersion.updatedAt,
+                                user,
+                                tx,
+                            );
+
+                        if (result) {
+                            this.logger.info(`Rolled back chart ${chartUuid}`);
+                        } else {
+                            this.logger.warn(
+                                `No chart version found for ${chartUuid} at timestamp ${targetVersion.updatedAt}. Chart may have been created after this dashboard version.`,
+                            );
+                        }
+                    }),
+                );
+            } else {
+                this.logger.info('No dashboard-owned charts to rollback');
+            }
+        });
 
         this.analytics.track({
             event: 'dashboard_version.rollback',

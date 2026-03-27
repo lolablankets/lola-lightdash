@@ -1,5 +1,7 @@
-import { Box, Group, Stack, Text } from '@mantine-8/core';
+import { Badge, Box, Group, Stack, Text } from '@mantine-8/core';
+import { IconCircleCheckFilled } from '@tabler/icons-react';
 import { type FC, type MutableRefObject } from 'react';
+import { useContentVerificationEnabled } from '../../../hooks/useContentVerificationEnabled';
 import { type SearchItem } from '../types/searchItem';
 import classes from './OmnibarItem.module.css';
 import {
@@ -22,6 +24,12 @@ const itemHasValidationError = (searchItem: SearchItem) =>
     'validationErrors' in searchItem.item &&
     searchItem.item.validationErrors?.length > 0;
 
+const itemHasVerification = (searchItem: SearchItem) =>
+    searchItem.item &&
+    'verification' in searchItem.item &&
+    searchItem.item.verification !== null &&
+    searchItem.item.verification !== undefined;
+
 const OmnibarItem: FC<Props> = ({
     item,
     projectUuid,
@@ -30,6 +38,7 @@ const OmnibarItem: FC<Props> = ({
     onClick,
     scrollRef,
 }) => {
+    const isContentVerificationEnabled = useContentVerificationEnabled();
     return (
         <Group
             role="menuitem"
@@ -53,9 +62,25 @@ const OmnibarItem: FC<Props> = ({
             </Box>
 
             <Stack gap="two" className={classes.content}>
-                <Text fw={500} size="sm" truncate ref={scrollRef}>
-                    {item.prefix} {item.title}
-                </Text>
+                <Group gap="xs" wrap="nowrap">
+                    <Text fw={500} size="sm" truncate ref={scrollRef}>
+                        {item.prefix} {item.title}
+                    </Text>
+                    {isContentVerificationEnabled &&
+                        itemHasVerification(item) && (
+                            <Badge
+                                size="xs"
+                                variant="light"
+                                color="green"
+                                leftSection={
+                                    <IconCircleCheckFilled size={10} />
+                                }
+                                style={{ flexShrink: 0 }}
+                            >
+                                Verified
+                            </Badge>
+                        )}
+                </Group>
 
                 {item.description || item.typeLabel ? (
                     <Text size="xs" truncate c="dimmed">

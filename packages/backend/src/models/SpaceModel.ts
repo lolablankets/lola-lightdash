@@ -474,6 +474,7 @@ export class SpaceModel {
                         createdAt: error.created_at,
                     }),
                 ),
+                verification: null,
             }),
         );
     }
@@ -631,6 +632,7 @@ export class SpaceModel {
             validationErrors: [],
             slug: savedChart.slug,
             source: chartSourceType,
+            verification: null,
         }));
     }
 
@@ -818,6 +820,7 @@ export class SpaceModel {
             ),
             slug: savedQuery.slug,
             source: ChartSourceType.DBT_EXPLORE,
+            verification: null,
         }));
     }
 

@@ -15,8 +15,16 @@ import type {
     SavedChart,
     SqlChart,
 } from '..';
+import type { ContentVerificationInfo } from './contentVerification';
 
 export const currentVersion = 1;
+
+export enum ContentAsCodeType {
+    CHART = 'chart',
+    DASHBOARD = 'dashboard',
+    SQL_CHART = 'sql_chart',
+    SPACE = 'space',
+}
 
 /**
  * Permissive filter types for chart-as-code uploads where `id` may be omitted.
@@ -66,10 +74,14 @@ export type ChartAsCode = Omit<
     dashboardSlug: string | undefined;
     /** Schema version for this chart configuration */
     version: number;
+    /** Content type discriminator */
+    contentType?: ContentAsCodeType.CHART;
     /** Slug of the space containing this chart */
     spaceSlug: string;
     /** Timestamp when this chart was downloaded from Lightdash */
     downloadedAt?: Date;
+    /** Verification status of this chart. Read-only; ignored on upload. */
+    verification?: ContentVerificationInfo | null;
 };
 
 // SQL Charts are stored separately from regular saved charts
@@ -79,6 +91,7 @@ export type SqlChartAsCode = Pick<
     'name' | 'description' | 'slug' | 'sql' | 'limit' | 'config' | 'chartKind'
 > & {
     version: number;
+    contentType?: ContentAsCodeType.SQL_CHART;
     spaceSlug: string;
     updatedAt?: Date;
     downloadedAt?: Date;
@@ -98,6 +111,7 @@ export type ApiChartAsCodeListResponse = {
               >
             | undefined;
         missingIds: string[];
+        spaces: SpaceAsCode[];
         total: number;
         offset: number;
     };
@@ -118,6 +132,7 @@ export type ApiSqlChartAsCodeListResponse = {
     results: {
         sqlCharts: SqlChartAsCode[];
         missingIds: string[];
+        spaces: SpaceAsCode[];
         total: number;
         offset: number;
     };
@@ -148,6 +163,7 @@ export type DashboardAsCode = Pick<
     updatedAt?: Date;
     tiles: DashboardTileAsCode[];
     version: number;
+    contentType?: ContentAsCodeType.DASHBOARD;
     spaceSlug: string;
     downloadedAt?: Date;
     filters?: {
@@ -155,6 +171,16 @@ export type DashboardAsCode = Pick<
         metrics?: DashboardFilterRule[];
         tableCalculations?: DashboardFilterRule[];
     };
+    /** Verification status of this dashboard. Read-only; ignored on upload. */
+    verification?: ContentVerificationInfo | null;
+};
+
+export type SpaceAsCode = {
+    contentType: ContentAsCodeType.SPACE;
+    /** The original human-readable space name (preserves emoji, casing, etc.) */
+    spaceName: string;
+    /** The space slug used for file naming and cross-referencing */
+    slug: string;
 };
 
 export type ApiDashboardAsCodeListResponse = {
@@ -171,6 +197,7 @@ export type ApiDashboardAsCodeListResponse = {
               >
             | undefined;
         missingIds: string[];
+        spaces: SpaceAsCode[];
         total: number;
         offset: number;
     };

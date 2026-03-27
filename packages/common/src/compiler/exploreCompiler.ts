@@ -44,6 +44,7 @@ import {
     getAvailableParametersFromTables,
     getParameterReferences,
     getParameterReferencesFromSqlAndFormat,
+    validateParameterConfiguration,
     validateParameterNames,
     validateParameterReferences,
 } from './parameters';
@@ -66,7 +67,7 @@ type Reference = {
  * like "summary" matching "sum".
  */
 const SQL_AGGREGATION_FUNCTIONS_PATTERN =
-    /\b(sum|count_if|countif|count|avg|average|min|max|median|stddev|stddev_pop|stddev_samp|variance|var_pop|var_samp|percentile|percentile_cont|percentile_disc|count_distinct|approx_count_distinct|any_value|array_agg|string_agg|group_concat|listagg|corr|covar_pop|covar_samp|mode|approx_percentile)\s*\(/i;
+    /\b(sum|count_if|countif|count|avg|average|max_by|min_by|min|max|median|stddev|stddev_pop|stddev_samp|variance|var_pop|var_samp|percentile|percentile_cont|percentile_disc|count_distinct|approx_count_distinct|any_value|array_agg|string_agg|group_concat|listagg|corr|covar_pop|covar_samp|mode|approx_percentile)\s*\(/i;
 
 /**
  * Check if the SQL contains any aggregation functions.
@@ -283,14 +284,9 @@ export class ExploreCompiler {
         // Collect warnings for partial compilation
         const exploreWarnings: InlineError[] = [];
 
-        // Collect warnings from the base table (e.g. unresolved custom granularities)
+        // Collect warnings from the base table (e.g. unresolved custom granularities, duplicate field names)
         if (tables[baseTable].warnings) {
-            tables[baseTable].warnings.forEach((message) => {
-                exploreWarnings.push({
-                    type: InlineErrorType.FIELD_ERROR,
-                    message,
-                });
-            });
+            exploreWarnings.push(...(tables[baseTable].warnings ?? []));
         }
 
         // Filter joined tables - skip missing tables when partial compilation is enabled
@@ -342,6 +338,16 @@ export class ExploreCompiler {
                     invalidParameters,
                 },
             );
+        }
+
+        const { isValid, error: paramConfigError } =
+            validateParameterConfiguration(meta.parameters);
+
+        if (!isValid) {
+            exploreWarnings.push({
+                type: InlineErrorType.INVALID_PARAMETER,
+                message: `Invalid parameter configuration: ${paramConfigError}`,
+            });
         }
 
         const includedTables = validJoinedTables.reduce<Record<string, Table>>(

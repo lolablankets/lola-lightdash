@@ -93,6 +93,35 @@ export enum FeatureFlags {
      * Enable custom group bins for string dimensions
      */
     CustomGroupBins = 'custom-group-bins',
+
+    /**
+     * Enable changing the explore a chart points to from the chart UI
+     */
+    ChangeChartExplore = 'change-chart-explore',
+
+    /**
+     * Enable performance optimizations for charts with many series/data points.
+     * Switches to canvas renderer, hides overlapping labels, and enables
+     * data sampling for line charts when datasets are large.
+     */
+    LargeChartPerformance = 'large-chart-performance',
+
+    /**
+     * Enable content verification (verified seal for charts and dashboards)
+     */
+    ContentVerification = 'content-verification',
+
+    /**
+     * Enable show/hide N rows from start/end of chart data
+     */
+    ShowHideRows = 'show-hide-rows',
+
+    /**
+     * Keep visited dashboard tabs mounted in the DOM (hidden) for instant
+     * re-switching. Disabled by default because large dashboards can spike
+     * browser memory to 3 GB+ when all tab data stays in memory.
+     */
+    DashboardTabsInMemory = 'dashboard-tabs-in-memory',
 }
 
 export type FeatureFlag = {

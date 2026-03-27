@@ -25,6 +25,7 @@ import {
     IconPlug,
     IconRefresh,
     IconReportAnalytics,
+    IconShieldCheck,
     IconTableOptions,
     IconTrash,
     IconUserCircle,
@@ -58,6 +59,7 @@ import GithubSettingsPanel from '../components/UserSettings/GithubSettingsPanel'
 import GitlabSettingsPanel from '../components/UserSettings/GitlabSettingsPanel';
 import ImpersonationPanel from '../components/UserSettings/ImpersonationPanel';
 import { MyWarehouseConnectionsPanel } from '../components/UserSettings/MyWarehouseConnectionsPanel';
+import OAuthClientsPanel from '../components/UserSettings/OAuthClientsPanel';
 import OrganizationPanel from '../components/UserSettings/OrganizationPanel';
 import { OrganizationWarehouseCredentialsPanel } from '../components/UserSettings/OrganizationWarehouseCredentialsPanel';
 import PasswordPanel from '../components/UserSettings/PasswordPanel';
@@ -76,6 +78,7 @@ import { CustomRoleEdit } from '../ee/pages/customRoles/CustomRoleEdit';
 import { CustomRoles } from '../ee/pages/customRoles/CustomRoles';
 import { useOrganization } from '../hooks/organization/useOrganization';
 import { useActiveProjectUuid } from '../hooks/useActiveProject';
+import { useContentVerificationEnabled } from '../hooks/useContentVerificationEnabled';
 import { useProject } from '../hooks/useProject';
 import {
     useClientFeatureFlag,
@@ -107,6 +110,8 @@ const Settings: FC = () => {
     const isServiceAccountFeatureFlagEnabled = useClientFeatureFlag(
         CommercialFeatureFlags.ServiceAccounts,
     );
+
+    const isContentVerificationEnabled = useContentVerificationEnabled();
 
     const {
         health: {
@@ -398,6 +403,13 @@ const Settings: FC = () => {
                         {health?.hasGitlab && <GitlabSettingsPanel />}
                     </Stack>
                 ),
+            });
+        }
+
+        if (user?.ability.can('manage', 'Organization')) {
+            allowedRoutes.push({
+                path: '/oauthClients',
+                element: <OAuthClientsPanel />,
             });
         }
 
@@ -726,6 +738,17 @@ const Settings: FC = () => {
                                     />
                                 )}
 
+                                {user.ability.can('manage', 'Organization') && (
+                                    <RouterNavLink
+                                        label="OAuth applications"
+                                        exact
+                                        to="/generalSettings/oauthClients"
+                                        leftSection={
+                                            <MantineIcon icon={IconPlug} />
+                                        }
+                                    />
+                                )}
+
                                 {user.ability.can(
                                     'manage',
                                     subject(
@@ -1032,6 +1055,27 @@ const Settings: FC = () => {
                                             leftSection={
                                                 <MantineIcon
                                                     icon={IconChecklist}
+                                                />
+                                            }
+                                        />
+                                    ) : null}
+
+                                    {isContentVerificationEnabled &&
+                                    user.ability?.can(
+                                        'manage',
+                                        subject('ContentVerification', {
+                                            organizationUuid:
+                                                project.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        }),
+                                    ) ? (
+                                        <RouterNavLink
+                                            label="Verified content"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/verifiedContent`}
+                                            leftSection={
+                                                <MantineIcon
+                                                    icon={IconShieldCheck}
                                                 />
                                             }
                                         />

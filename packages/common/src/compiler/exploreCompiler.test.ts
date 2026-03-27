@@ -400,7 +400,7 @@ describe('Compile metrics with filters', () => {
                 [],
             ).compiledSql,
         ).toStrictEqual(
-            `MAX(CASE WHEN (LOWER("table1".shared) LIKE LOWER('%foo%')) THEN ("table1".number_column) ELSE NULL END)`,
+            `MAX(CASE WHEN (("table1".shared) LIKE '%foo%') THEN ("table1".number_column) ELSE NULL END)`,
         );
     });
     test('should show filters as columns metric2', () => {
@@ -423,7 +423,7 @@ describe('Compile metrics with filters', () => {
                 [],
             ).compiledSql,
         ).toStrictEqual(
-            `MAX(CASE WHEN (LOWER("table1".shared) LIKE LOWER('%foo%')) THEN (CASE WHEN "table1".number_column THEN 1 ELSE 0 END) ELSE NULL END)`,
+            `MAX(CASE WHEN (("table1".shared) LIKE '%foo%') THEN (CASE WHEN "table1".number_column THEN 1 ELSE 0 END) ELSE NULL END)`,
         );
     });
 });
@@ -1067,6 +1067,10 @@ describe('sqlContainsAggregation', () => {
             ['approx_percentile(${field}, 0.5)', true],
             ["COUNT_IF(${field} <> 'n/a')", true],
             ['countif(${field} > 0)', true],
+            ['max_by(${field}, ${date})', true],
+            ['MAX_BY(${field}, ${date})', true],
+            ['min_by(${field}, ${date})', true],
+            ['MIN_BY(${field}, ${date})', true],
         ])('"%s" should return %s', (sql, expected) => {
             expect(sqlContainsAggregation(sql)).toBe(expected);
         });
@@ -1094,6 +1098,7 @@ describe('sqlContainsAggregation', () => {
             ["CASE WHEN ${status} = 'active' THEN 1 ELSE 0 END", false],
             ['UPPER(${name})', false],
             ['CONCAT(${first_name}, ${last_name})', false],
+            ['max_bytes(${field})', false],
         ])('"%s" should return false', (sql) => {
             expect(sqlContainsAggregation(sql)).toBe(false);
         });
@@ -1179,6 +1184,15 @@ describe('sqlAggregationWrapsReferences', () => {
             sqlAggregationWrapsReferences('sum(${other_table.max_value})', [
                 'other_table.max_value',
             ]),
+        ).toBe(true);
+    });
+
+    test('should return true when max_by wraps a metric reference', () => {
+        expect(
+            sqlAggregationWrapsReferences(
+                'max_by(${active_customers}, ${updated_on})',
+                ['active_customers'],
+            ),
         ).toBe(true);
     });
 });

@@ -242,10 +242,9 @@ export default class EmailClient {
                     ...(useCid
                         ? EmailClient.STATIC_CID_IMAGES.map((img) => ({
                               filename: img.filename,
-                              // Safe: frontend and backend are co-located in the same pod
                               path: path.join(
                                   __dirname,
-                                  `../../../../frontend/public/${img.filename}`,
+                                  `./templates/${img.filename}`,
                               ),
                               cid: img.cid,
                               contentDisposition: 'inline' as const,
@@ -616,15 +615,16 @@ export default class EmailClient {
         pdfFile?: string,
         expirationDays?: number,
         deliveryType: string = 'Scheduled delivery',
-        imageLocalPath?: string,
+        imageBuffer?: Buffer,
     ) {
         const useCidImage =
             this.lightdashConfig.smtp?.inlineImageCid === true &&
-            imageLocalPath !== undefined;
+            imageBuffer !== undefined;
 
         const attachments: Array<{
             filename: string;
-            path: string;
+            path?: string;
+            content?: Buffer;
             contentType?: string;
             cid?: string;
             contentDisposition?: 'inline' | 'attachment';
@@ -633,7 +633,7 @@ export default class EmailClient {
         if (useCidImage) {
             attachments.push({
                 filename: 'chart-image.png',
-                path: imageLocalPath,
+                content: imageBuffer,
                 cid: 'chart-image',
                 contentDisposition: 'inline',
             });

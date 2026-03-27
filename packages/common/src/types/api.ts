@@ -74,10 +74,16 @@ import {
     type ApiContentResponse,
 } from './content';
 import {
+    type ApiContentVerificationDeleteResponse,
+    type ApiContentVerificationResponse,
+    type ApiVerifiedContentListResponse,
+} from './contentVerification';
+import {
     type Dashboard,
     type DashboardAvailableFilters,
     type DashboardBasicDetails,
     type DashboardHistory,
+    type DashboardVersion,
 } from './dashboard';
 import { type DbtExposure } from './dbt';
 import { type EmailStatusExpiring } from './email';
@@ -109,6 +115,10 @@ import type {
     ApiMetricsExplorerQueryResults,
     ApiMetricsExplorerTotalResults,
 } from './metricsExplorer';
+import {
+    type CreateOAuthClientResponse,
+    type OAuthClientSummary,
+} from './oauth';
 import {
     type DeleteOpenIdentity,
     type OpenIdIdentitySummary,
@@ -854,6 +864,7 @@ type ApiResults =
     | ChartHistory
     | ChartVersion
     | DashboardHistory
+    | DashboardVersion
     | EmbedUrl
     | DecodedEmbed
     | Array<GitRepo>
@@ -958,7 +969,13 @@ type ApiResults =
     | ApiSpaceDeleteImpactResponse['results']
     | ApiGetPreAggregateStatsResponse['results']
     | ApiGetPreAggregateMaterializationsResponse['results']
-    | ApiImpersonationOrganizationSettingsResponse['results'];
+    | ApiImpersonationOrganizationSettingsResponse['results']
+    | ApiContentVerificationResponse['results']
+    | ApiContentVerificationDeleteResponse['results']
+    | ApiVerifiedContentListResponse['results']
+    | OAuthClientSummary[]
+    | OAuthClientSummary
+    | CreateOAuthClientResponse;
 // Note: EE API types removed from ApiResults to avoid circular imports
 // They can still be used with ApiResponse<T> by importing from '@lightdash/common'
 

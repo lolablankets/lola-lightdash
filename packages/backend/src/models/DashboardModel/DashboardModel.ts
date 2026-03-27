@@ -1,5 +1,6 @@
 import {
     assertUnreachable,
+    ContentType,
     CreateDashboard,
     CreateDashboardChartTile,
     CreateDashboardHeadingTile,
@@ -74,6 +75,7 @@ import { SpaceTableName } from '../../database/entities/spaces';
 import { UserTable, UserTableName } from '../../database/entities/users';
 import { DbValidationTable } from '../../database/entities/validation';
 import { generateUniqueSlug } from '../../utils/SlugUtils';
+import { ContentVerificationModel } from '../ContentVerificationModel';
 import { SpaceModel } from '../SpaceModel';
 import Transaction = Knex.Transaction;
 
@@ -126,6 +128,7 @@ type DashboardModelArguments = {
     lightdashConfig?: {
         dashboard: { versionHistory: { daysLimit: number } };
     };
+    contentVerificationModel?: ContentVerificationModel;
 };
 
 export class DashboardModel {
@@ -133,9 +136,12 @@ export class DashboardModel {
 
     private readonly lightdashConfig?: DashboardModelArguments['lightdashConfig'];
 
+    private contentVerificationModel: ContentVerificationModel | undefined;
+
     constructor(args: DashboardModelArguments) {
         this.database = args.database;
         this.lightdashConfig = args.lightdashConfig;
+        this.contentVerificationModel = args.contentVerificationModel;
     }
 
     private static async createVersion(
@@ -532,6 +538,7 @@ export class DashboardModel {
                                 createdAt: error.created_at,
                             }),
                         ),
+                        verification: null,
                         tileTypes,
                     };
                 },
@@ -992,6 +999,10 @@ export class DashboardModel {
             .orderBy([
                 { column: `${DashboardTilesTableName}.y_offset` },
                 { column: `${DashboardTilesTableName}.x_offset` },
+                { column: `${DashboardTilesTableName}.tab_uuid` },
+                {
+                    column: `${DashboardTilesTableName}.dashboard_tile_uuid`,
+                },
             ]);
 
         const tabs = await this.database(DashboardTabsTableName)
@@ -1012,6 +1023,12 @@ export class DashboardModel {
         const tableCalculationFilters = view?.filters?.tableCalculations;
         view.filters.tableCalculations = tableCalculationFilters || [];
 
+        const verification =
+            (await this.contentVerificationModel?.getByContent(
+                ContentType.DASHBOARD,
+                dashboard.dashboard_uuid,
+            )) ?? null;
+
         return {
             organizationUuid: dashboard.organization_uuid,
             projectUuid: dashboard.project_uuid,
@@ -1019,6 +1036,7 @@ export class DashboardModel {
             versionUuid: dashboard.dashboard_version_uuid,
             uuid: dashboard.dashboard_uuid,
             name: dashboard.name,
+            verification,
             description: dashboard.description,
             updatedAt: dashboard.created_at,
             pinnedListUuid: dashboard.pinned_list_uuid,
@@ -1358,8 +1376,10 @@ export class DashboardModel {
         version: DashboardVersionedFields,
         user: Pick<SessionUser, 'userUuid'>,
         projectUuid: string,
+        tx?: Knex.Transaction,
     ): Promise<DashboardDAO> {
-        const [dashboard] = await this.database(DashboardsTableName)
+        const db = tx || this.database;
+        const [dashboard] = await db(DashboardsTableName)
             .select(['dashboard_id'])
             .where('dashboard_uuid', dashboardUuid)
             .whereNull('deleted_at')
@@ -1367,13 +1387,21 @@ export class DashboardModel {
         if (!dashboard) {
             throw new NotFoundError('Dashboard not found');
         }
-        await this.database.transaction(async (trx) => {
+
+        const doWork = async (trx: Knex.Transaction) => {
             await DashboardModel.createVersion(trx, dashboard.dashboard_id, {
                 ...version,
                 tabs: version.tabs || [],
                 updatedByUser: user,
             });
-        });
+        };
+
+        if (tx) {
+            await doWork(tx);
+        } else {
+            await this.database.transaction(async (trx) => doWork(trx));
+        }
+
         return this.getByIdOrSlug(dashboardUuid);
     }
 
@@ -1564,6 +1592,63 @@ export class DashboardModel {
             .where(`${DashboardsTableName}.dashboard_uuid`, dashboardUuid)
             .orderBy(`${DashboardVersionsTableName}.created_at`, 'desc')
             .limit(1);
+    }
+
+    async getVersionSummaryByUuid(
+        dashboardUuid: string,
+        versionUuid: string,
+    ): Promise<DashboardVersionSummary> {
+        type VersionSummaryRow = {
+            dashboard_uuid: string;
+            dashboard_version_uuid: string;
+            created_at: Date;
+            user_uuid: string | null;
+            first_name: string | null;
+            last_name: string | null;
+        };
+
+        const row = await this.database(DashboardVersionsTableName)
+            .innerJoin(
+                DashboardsTableName,
+                `${DashboardsTableName}.dashboard_id`,
+                `${DashboardVersionsTableName}.dashboard_id`,
+            )
+            .leftJoin(
+                UserTableName,
+                `${UserTableName}.user_uuid`,
+                `${DashboardVersionsTableName}.updated_by_user_uuid`,
+            )
+            .select<VersionSummaryRow[]>(
+                `${DashboardsTableName}.dashboard_uuid`,
+                `${DashboardVersionsTableName}.dashboard_version_uuid`,
+                `${DashboardVersionsTableName}.created_at`,
+                `${UserTableName}.user_uuid`,
+                `${UserTableName}.first_name`,
+                `${UserTableName}.last_name`,
+            )
+            .where(`${DashboardsTableName}.dashboard_uuid`, dashboardUuid)
+            .where(
+                `${DashboardVersionsTableName}.dashboard_version_uuid`,
+                versionUuid,
+            )
+            .first();
+
+        if (!row) {
+            throw new NotFoundError('Dashboard version not found');
+        }
+
+        return {
+            dashboardUuid: row.dashboard_uuid,
+            versionUuid: row.dashboard_version_uuid,
+            createdAt: row.created_at,
+            createdBy: row.user_uuid
+                ? {
+                      userUuid: row.user_uuid,
+                      firstName: row.first_name ?? '',
+                      lastName: row.last_name ?? '',
+                  }
+                : null,
+        };
     }
 
     async getLatestVersionSummaries(
@@ -1898,6 +1983,10 @@ export class DashboardModel {
             .orderBy([
                 { column: `${DashboardTilesTableName}.y_offset` },
                 { column: `${DashboardTilesTableName}.x_offset` },
+                { column: `${DashboardTilesTableName}.tab_uuid` },
+                {
+                    column: `${DashboardTilesTableName}.dashboard_tile_uuid`,
+                },
             ]);
 
         const tabs = await this.database(DashboardTabsTableName)
@@ -1918,6 +2007,12 @@ export class DashboardModel {
         const tableCalculationFilters = view?.filters?.tableCalculations;
         view.filters.tableCalculations = tableCalculationFilters || [];
 
+        const verification =
+            (await this.contentVerificationModel?.getByContent(
+                ContentType.DASHBOARD,
+                dashboard.dashboard_uuid,
+            )) ?? null;
+
         return {
             organizationUuid: dashboard.organization_uuid,
             projectUuid: dashboard.project_uuid,
@@ -1925,6 +2020,7 @@ export class DashboardModel {
             versionUuid: dashboard.dashboard_version_uuid,
             uuid: dashboard.dashboard_uuid,
             name: dashboard.name,
+            verification,
             description: dashboard.description,
             updatedAt: dashboard.created_at,
             pinnedListUuid: dashboard.pinned_list_uuid,

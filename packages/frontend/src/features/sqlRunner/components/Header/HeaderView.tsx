@@ -10,22 +10,30 @@ import {
     Title,
     Tooltip,
 } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import {
+    IconCirclesRelation,
     IconDatabaseExport,
     IconDots,
     IconLayoutGridAdd,
     IconTrash,
 } from '@tabler/icons-react';
-import { useCallback, type FC } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useRef, type FC } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import MantineIcon from '../../../../components/common/MantineIcon';
 import { UpdatedInfo } from '../../../../components/common/PageHeader/UpdatedInfo';
 import { ResourceInfoPopup } from '../../../../components/common/ResourceInfoPopup/ResourceInfoPopup';
 import { TitleBreadCrumbs } from '../../../../components/Explorer/SavedChartsHeader/TitleBreadcrumbs';
 import AddTilesToDashboardModal from '../../../../components/SavedDashboards/AddTilesToDashboardModal';
 import { useProject } from '../../../../hooks/useProject';
+import { Can } from '../../../../providers/Ability';
 import useApp from '../../../../providers/App/useApp';
 import { PromotionConfirmDialog } from '../../../promotion/components/PromotionConfirmDialog';
+import {
+    getSchedulerUuidFromUrlParams,
+    isSchedulerTypeSync,
+} from '../../../scheduler/utils';
+import { SqlChartSyncModal } from '../../../sync/components/SqlChartSyncModal';
 import {
     usePromoteSqlChartDiffMutation,
     usePromoteSqlChartMutation,
@@ -36,8 +44,9 @@ import { DeleteSqlChartModal } from '../DeleteSqlChartModal';
 
 export const HeaderView: FC = () => {
     const navigate = useNavigate();
+    const { search, pathname } = useLocation();
     const dispatch = useAppDispatch();
-    const { user } = useApp();
+    const { user, health } = useApp();
     const projectUuid = useAppSelector((state) => state.sqlRunner.projectUuid);
     const { data: project } = useProject(projectUuid);
     const space = useAppSelector(
@@ -58,6 +67,32 @@ export const HeaderView: FC = () => {
     const onCloseDeleteModal = useCallback(() => {
         dispatch(toggleModal('deleteChartModal'));
     }, [dispatch]);
+
+    const [isSyncModalOpen, syncModalHandlers] = useDisclosure();
+
+    // Open sync modal when navigating from schedulers settings page
+    const hasProcessedUrlParams = useRef(false);
+    useEffect(() => {
+        if (hasProcessedUrlParams.current) return;
+
+        const schedulerUuid = getSchedulerUuidFromUrlParams(search);
+        if (!schedulerUuid) return;
+
+        hasProcessedUrlParams.current = true;
+
+        if (isSchedulerTypeSync(search)) {
+            syncModalHandlers.open();
+        }
+
+        // Clear URL params to prevent modal from reopening on close
+        const newParams = new URLSearchParams(search);
+        newParams.delete('scheduler_uuid');
+        newParams.delete('isSync');
+        void navigate(
+            { pathname, search: newParams.toString() },
+            { replace: true },
+        );
+    }, [search, navigate, pathname, syncModalHandlers]);
 
     const canManageSqlRunner = user.data?.ability?.can(
         'manage',
@@ -88,6 +123,10 @@ export const HeaderView: FC = () => {
                 : [],
         }),
     );
+
+    const hasGoogleDriveEnabled =
+        health.data?.auth.google.oauth2ClientId !== undefined &&
+        health.data?.auth.google.googleDriveApiKey !== undefined;
 
     const { mutate: promoteSqlChart } = usePromoteSqlChartMutation(projectUuid);
     const {
@@ -194,6 +233,29 @@ export const HeaderView: FC = () => {
                                     >
                                         Add to dashboard
                                     </Menu.Item>
+                                    {hasGoogleDriveEnabled && (
+                                        <Can
+                                            I="manage"
+                                            this={subject('GoogleSheets', {
+                                                organizationUuid:
+                                                    user.data?.organizationUuid,
+                                                projectUuid,
+                                            })}
+                                        >
+                                            <Menu.Item
+                                                icon={
+                                                    <MantineIcon
+                                                        icon={
+                                                            IconCirclesRelation
+                                                        }
+                                                    />
+                                                }
+                                                onClick={syncModalHandlers.open}
+                                            >
+                                                Google Sheets Sync
+                                            </Menu.Item>
+                                        </Can>
+                                    )}
                                     {canPromoteChart && (
                                         <Tooltip
                                             label="You must enable first an upstream project in settings > Data ops"
@@ -266,6 +328,14 @@ export const HeaderView: FC = () => {
                     uuid={savedSqlChart.savedSqlUuid}
                     dashboardTileType={DashboardTileTypes.SQL_CHART}
                     onClose={onCloseAddToDashboardModal}
+                />
+            )}
+            {isSyncModalOpen && (
+                <SqlChartSyncModal
+                    projectUuid={projectUuid}
+                    savedSqlUuid={savedSqlChart.savedSqlUuid}
+                    opened={isSyncModalOpen}
+                    onClose={syncModalHandlers.close}
                 />
             )}
             {(promoteSqlChartDiff || promoteSqlChartDiffLoading) && (

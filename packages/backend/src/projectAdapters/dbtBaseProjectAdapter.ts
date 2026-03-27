@@ -33,6 +33,7 @@ import * as Sentry from '@sentry/node';
 import fs from 'fs/promises';
 import path from 'path';
 import { LightdashAnalytics } from '../analytics/LightdashAnalytics';
+import { preAggregatePostProcessor } from '../ee/preAggregates/postProcessor';
 import Logger from '../logging/logger';
 import {
     CachedWarehouse,
@@ -40,6 +41,8 @@ import {
     ProjectAdapter,
     type TrackingParams,
 } from '../types';
+
+const postProcessors = [preAggregatePostProcessor];
 
 export class DbtBaseProjectAdapter implements ProjectAdapter {
     dbtClient: DbtClient;
@@ -256,8 +259,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 metrics,
                 this.warehouseClient,
                 lightdashProjectConfig,
-                disableTimestampConversion,
-                allowPartialCompilation,
+                {
+                    disableTimestampConversion,
+                    allowPartialCompilation,
+                    postProcessors,
+                },
             );
             Logger.info('Finished compiling explores');
             return [...lazyExplores, ...failedExplores];
@@ -301,8 +307,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     metrics,
                     this.warehouseClient,
                     lightdashProjectConfig,
-                    disableTimestampConversion,
-                    allowPartialCompilation,
+                    {
+                        disableTimestampConversion,
+                        allowPartialCompilation,
+                        postProcessors,
+                    },
                 );
                 Logger.info(
                     'Finished compiling explores after missing catalog error',

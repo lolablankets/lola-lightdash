@@ -1,6 +1,7 @@
 import {
     AnyType,
     PreAggregateMissReason,
+    QueryExecutionContext,
     QueryHistoryStatus,
 } from '@lightdash/common';
 import { EventEmitter } from 'events';
@@ -13,7 +14,7 @@ import { performance } from 'perf_hooks';
 import prometheus from 'prom-client';
 import { z } from 'zod';
 import { LightdashConfig } from '../config/parseConfig';
-import { PreAggregateMaterializationsTableName } from '../database/entities/preAggregates';
+import { PreAggregateMaterializationsTableName } from '../ee/database/entities/preAggregates';
 import Logger from '../logging/logger';
 import { SchedulerClient } from '../scheduler/SchedulerClient';
 import {
@@ -35,6 +36,25 @@ const prometheusEventMetricsConfigSchema = z.object({
             .strict(),
     ),
 });
+
+const SCHEDULED_CONTEXTS: ReadonlySet<string> = new Set<string>([
+    QueryExecutionContext.AUTOREFRESHED_DASHBOARD,
+    QueryExecutionContext.ALERT,
+    QueryExecutionContext.SCHEDULED_DELIVERY,
+    QueryExecutionContext.SCHEDULED_GSHEETS_CHART,
+    QueryExecutionContext.SCHEDULED_GSHEETS_DASHBOARD,
+    QueryExecutionContext.SCHEDULED_GSHEETS_SQL_CHART,
+    QueryExecutionContext.SCHEDULED_CHART,
+    QueryExecutionContext.SCHEDULED_DASHBOARD,
+    QueryExecutionContext.CLI,
+    QueryExecutionContext.PRE_AGGREGATE_MATERIALIZATION,
+]);
+
+export function getQueryContextLabel(
+    context: string,
+): 'interactive' | 'scheduled' {
+    return SCHEDULED_CONTEXTS.has(context) ? 'scheduled' : 'interactive';
+}
 
 export default class PrometheusMetrics {
     private readonly config: LightdashConfig['prometheus'];
@@ -69,10 +89,6 @@ export default class PrometheusMetrics {
     public preAggregateActiveMaterializationsGauge: prometheus.Gauge | null =
         null;
 
-    // Pre-aggregate query execution metrics
-    public queryExecutionDurationHistogram: prometheus.Histogram<string> | null =
-        null;
-
     public duckdbResolutionCounter: prometheus.Counter<string> | null = null;
 
     public duckdbResolutionDurationHistogram: prometheus.Histogram<string> | null =
@@ -86,15 +102,36 @@ export default class PrometheusMetrics {
 
     public queryCacheHitCounter: prometheus.Counter<string> | null = null;
 
-    public preAggregateMaterializationFileSizeGauge: prometheus.Gauge<string> | null =
+    public preAggregateMaterializationFileSizeHistogram: prometheus.Histogram<string> | null =
         null;
 
     public preAggregateParquetConversionDurationHistogram: prometheus.Histogram<string> | null =
         null;
 
+    // Materialization sub-step metrics
+    private materializationPollDurationHistogram: prometheus.Histogram<string> | null =
+        null;
+
+    private materializationWarehouseDurationHistogram: prometheus.Histogram<string> | null =
+        null;
+
+    private materializationPromoteDurationHistogram: prometheus.Histogram<string> | null =
+        null;
+
+    // DuckDB query profiling metrics
+    private duckdbQueryLatencyHistogram: prometheus.Histogram | null = null;
+
+    private duckdbParquetReadDurationHistogram: prometheus.Histogram | null =
+        null;
+
+    private duckdbBytesReadHistogram: prometheus.Histogram | null = null;
+
+    private duckdbScanAmplificationHistogram: prometheus.Histogram | null =
+        null;
+
     // Query history pipeline metrics
     private queryStateTransitionCounter: prometheus.Counter<
-        'from' | 'to'
+        'from' | 'to' | 'context'
     > | null = null;
 
     private queueWaitHistogram: prometheus.Histogram | null = null;
@@ -102,6 +139,8 @@ export default class PrometheusMetrics {
     private totalDurationHistogram: prometheus.Histogram | null = null;
 
     private warehouseDurationHistogram: prometheus.Histogram | null = null;
+
+    private overheadDurationHistogram: prometheus.Histogram | null = null;
 
     constructor(config: LightdashConfig['prometheus']) {
         this.config = config;
@@ -128,46 +167,49 @@ export default class PrometheusMetrics {
 
                 // Initialize query status metrics
                 this.queryStatusCounter = new prometheus.Counter({
-                    name: 'query_status_total',
-                    help: 'Total number of queries by status',
-                    labelNames: ['status'],
+                    name: 'lightdash_query_status_total',
+                    help: 'Total number of queries by terminal status',
+                    labelNames: ['status', 'context'],
                     ...rest,
                 });
 
                 // Query history pipeline metrics
                 this.queryStateTransitionCounter = new prometheus.Counter({
-                    name: 'query_history_state_transitions_total',
+                    name: 'lightdash_query_state_transitions_total',
                     help: 'Query state transitions (monotonic, safe across processes)',
-                    labelNames: ['from', 'to'],
+                    labelNames: ['from', 'to', 'context'],
                     ...rest,
                 });
 
                 this.queueWaitHistogram = new prometheus.Histogram({
-                    name: 'query_history_queue_wait_duration_ms',
-                    help: 'Time spent waiting in queue before execution (ms)',
-                    buckets: [
-                        100, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000,
-                        300000,
-                    ],
+                    name: 'lightdash_query_queue_wait_duration_seconds',
+                    help: 'Time spent waiting in queue before execution',
+                    labelNames: ['context'],
+                    buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300],
                     ...rest,
                 });
 
                 this.totalDurationHistogram = new prometheus.Histogram({
-                    name: 'query_history_total_duration_ms',
-                    help: 'Total query duration from creation to results ready (ms)',
-                    buckets: [
-                        500, 1000, 2500, 5000, 10000, 30000, 60000, 120000,
-                        300000, 600000,
-                    ],
+                    name: 'lightdash_query_total_duration_seconds',
+                    help: 'Total query duration from creation to results ready',
+                    labelNames: ['context'],
+                    buckets: [0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600],
                     ...rest,
                 });
 
                 this.warehouseDurationHistogram = new prometheus.Histogram({
-                    name: 'query_history_warehouse_duration_ms',
-                    help: 'Warehouse query execution duration (ms)',
-                    buckets: [
-                        100, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000,
-                    ],
+                    name: 'lightdash_query_warehouse_duration_seconds',
+                    help: 'Warehouse query execution duration',
+                    labelNames: ['warehouse_type', 'context'],
+                    buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
+                    ...rest,
+                });
+
+                this.overheadDurationHistogram = new prometheus.Histogram({
+                    name: 'lightdash_query_overhead_duration_seconds',
+                    help: 'Lightdash overhead: total duration minus warehouse execution time',
+                    labelNames: ['context'],
+                    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
                     ...rest,
                 });
 
@@ -278,7 +320,7 @@ export default class PrometheusMetrics {
 
                 // Initialize pre-aggregate metrics
                 this.preAggregateMatchCounter = new prometheus.Counter({
-                    name: 'assessment_pre_aggregate_match_total',
+                    name: 'lightdash_pre_aggregate_match_total',
                     help: 'Total number of pre-aggregate match attempts',
                     labelNames: ['result', 'miss_reason', 'format'],
                     ...rest,
@@ -286,7 +328,7 @@ export default class PrometheusMetrics {
 
                 this.preAggregateMaterializationCounter =
                     new prometheus.Counter({
-                        name: 'assessment_pre_aggregate_materialization_total',
+                        name: 'lightdash_pre_aggregate_materialization_total',
                         help: 'Total number of pre-aggregate materializations by outcome',
                         labelNames: ['status', 'trigger'],
                         ...rest,
@@ -294,49 +336,15 @@ export default class PrometheusMetrics {
 
                 this.preAggregateMaterializationDurationHistogram =
                     new prometheus.Histogram({
-                        name: 'assessment_pre_aggregate_materialization_duration_ms',
-                        help: 'Histogram of pre-aggregate materialization duration in milliseconds',
+                        name: 'lightdash_pre_aggregate_materialization_duration_seconds',
+                        help: 'Pre-aggregate materialization duration',
                         labelNames: ['status', 'trigger'],
-                        buckets: [
-                            1000, // 1s
-                            5000, // 5s
-                            10000, // 10s
-                            30000, // 30s
-                            60000, // 1min
-                            120000, // 2min
-                            300000, // 5min
-                            600000, // 10min
-                            900000, // 15min
-                            1800000, // 30min
-                        ],
+                        buckets: [1, 5, 10, 30, 60, 120, 300, 600, 900, 1800],
                         ...rest,
                     });
 
-                // Pre-aggregate query execution metrics
-                this.queryExecutionDurationHistogram = new prometheus.Histogram(
-                    {
-                        name: 'assessment_query_execution_duration_ms',
-                        help: 'Histogram of query execution duration in milliseconds by source',
-                        labelNames: ['source', 'context', 'status'],
-                        buckets: [
-                            100, // 100ms
-                            500, // 500ms
-                            1000, // 1s
-                            2500, // 2.5s
-                            5000, // 5s
-                            10000, // 10s
-                            30000, // 30s
-                            60000, // 1min
-                            120000, // 2min
-                            300000, // 5min
-                            600000, // 10min
-                        ],
-                        ...rest,
-                    },
-                );
-
                 this.duckdbResolutionCounter = new prometheus.Counter({
-                    name: 'assessment_pre_aggregate_duckdb_resolution_total',
+                    name: 'lightdash_pre_aggregate_duckdb_resolution_total',
                     help: 'Total number of DuckDB pre-aggregate resolution attempts',
                     labelNames: ['status', 'reason'],
                     ...rest,
@@ -344,25 +352,15 @@ export default class PrometheusMetrics {
 
                 this.duckdbResolutionDurationHistogram =
                     new prometheus.Histogram({
-                        name: 'assessment_pre_aggregate_duckdb_resolution_duration_ms',
-                        help: 'Histogram of DuckDB pre-aggregate resolution duration in milliseconds',
+                        name: 'lightdash_pre_aggregate_duckdb_resolution_duration_seconds',
+                        help: 'DuckDB pre-aggregate resolution duration',
                         labelNames: ['status'],
-                        buckets: [
-                            10, // 10ms
-                            50, // 50ms
-                            100, // 100ms
-                            250, // 250ms
-                            500, // 500ms
-                            1000, // 1s
-                            2500, // 2.5s
-                            5000, // 5s
-                            10000, // 10s
-                        ],
+                        buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
                         ...rest,
                     });
 
                 this.preAggregateFallbackCounter = new prometheus.Counter({
-                    name: 'assessment_pre_aggregate_fallback_total',
+                    name: 'lightdash_pre_aggregate_fallback_total',
                     help: 'Total number of opportunistic pre-aggregate fallbacks to warehouse',
                     labelNames: ['reason'],
                     ...rest,
@@ -370,52 +368,118 @@ export default class PrometheusMetrics {
 
                 this.s3ResultsUploadDurationHistogram =
                     new prometheus.Histogram({
-                        name: 'assessment_s3_results_upload_duration_ms',
-                        help: 'Histogram of S3 results upload duration in milliseconds',
+                        name: 'lightdash_s3_results_upload_duration_seconds',
+                        help: 'S3 results upload duration',
                         labelNames: ['source'],
-                        buckets: [
-                            100, // 100ms
-                            500, // 500ms
-                            1000, // 1s
-                            2500, // 2.5s
-                            5000, // 5s
-                            10000, // 10s
-                            30000, // 30s
-                            60000, // 1min
-                            120000, // 2min
-                            300000, // 5min
-                        ],
+                        buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300],
                         ...rest,
                     });
 
-                this.preAggregateMaterializationFileSizeGauge =
-                    new prometheus.Gauge({
-                        name: 'pre_aggregate_materialization_file_size_bytes',
+                this.preAggregateMaterializationFileSizeHistogram =
+                    new prometheus.Histogram({
+                        name: 'lightdash_pre_aggregate_materialization_file_size_bytes',
                         help: 'File size of pre-aggregate materialization in bytes',
                         labelNames: ['format'],
+                        buckets: [
+                            1024, // 1KB
+                            10240, // 10KB
+                            102400, // 100KB
+                            1048576, // 1MB
+                            10485760, // 10MB
+                            52428800, // 50MB
+                            104857600, // 100MB
+                            524288000, // 500MB
+                            1073741824, // 1GB
+                        ],
                         ...rest,
                     });
 
                 this.preAggregateParquetConversionDurationHistogram =
                     new prometheus.Histogram({
-                        name: 'pre_aggregate_parquet_conversion_duration_ms',
-                        help: 'Duration of JSONL to Parquet conversion in milliseconds',
+                        name: 'lightdash_pre_aggregate_parquet_conversion_duration_seconds',
+                        help: 'Duration of JSONL to Parquet conversion',
                         labelNames: ['status'],
+                        buckets: [0.5, 1, 2, 5, 10, 30, 60, 120],
+                        ...rest,
+                    });
+
+                // Materialization sub-step histograms
+                const materializationSubStepBuckets = [
+                    1, 5, 10, 30, 60, 120, 300, 600, 900, 1800,
+                ];
+
+                this.materializationPollDurationHistogram =
+                    new prometheus.Histogram({
+                        name: 'lightdash_pre_aggregate_materialization_poll_duration_seconds',
+                        help: 'Time spent polling for materialization query completion (seconds)',
+                        labelNames: ['status', 'trigger'],
+                        buckets: materializationSubStepBuckets,
+                        ...rest,
+                    });
+
+                this.materializationWarehouseDurationHistogram =
+                    new prometheus.Histogram({
+                        name: 'lightdash_pre_aggregate_materialization_warehouse_duration_seconds',
+                        help: 'Warehouse execution time during materialization (seconds)',
+                        labelNames: ['status', 'trigger'],
+                        buckets: materializationSubStepBuckets,
+                        ...rest,
+                    });
+
+                this.materializationPromoteDurationHistogram =
+                    new prometheus.Histogram({
+                        name: 'lightdash_pre_aggregate_materialization_promote_duration_seconds',
+                        help: 'Time to check file size and promote materialization to active (seconds)',
+                        labelNames: ['status', 'trigger'],
+                        buckets: materializationSubStepBuckets,
+                        ...rest,
+                    });
+
+                // DuckDB query profiling histograms
+                this.duckdbQueryLatencyHistogram = new prometheus.Histogram({
+                    name: 'lightdash_pre_aggregate_duckdb_query_latency_seconds',
+                    help: 'Total DuckDB query latency (seconds)',
+                    buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+                    ...rest,
+                });
+
+                this.duckdbParquetReadDurationHistogram =
+                    new prometheus.Histogram({
+                        name: 'lightdash_pre_aggregate_duckdb_parquet_read_duration_seconds',
+                        help: 'Time spent in READ_PARQUET operators (seconds)',
                         buckets: [
-                            500, // 500ms
-                            1000, // 1s
-                            2000, // 2s
-                            5000, // 5s
-                            10000, // 10s
-                            30000, // 30s
-                            60000, // 1min
-                            120000, // 2min
+                            0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
                         ],
                         ...rest,
                     });
 
+                this.duckdbBytesReadHistogram = new prometheus.Histogram({
+                    name: 'lightdash_pre_aggregate_duckdb_bytes_read',
+                    help: 'Bytes read from S3/parquet by DuckDB queries',
+                    buckets: [
+                        1024, // 1KB
+                        10240, // 10KB
+                        102400, // 100KB
+                        1048576, // 1MB
+                        10485760, // 10MB
+                        52428800, // 50MB
+                        104857600, // 100MB
+                        524288000, // 500MB
+                        1073741824, // 1GB
+                    ],
+                    ...rest,
+                });
+
+                this.duckdbScanAmplificationHistogram =
+                    new prometheus.Histogram({
+                        name: 'lightdash_pre_aggregate_duckdb_scan_amplification',
+                        help: 'Ratio of rows scanned to rows returned in DuckDB queries',
+                        buckets: [1, 1.5, 2, 5, 10, 25, 50, 100],
+                        ...rest,
+                    });
+
                 this.queryCacheHitCounter = new prometheus.Counter({
-                    name: 'assessment_pre_aggregate_cache_hit_total',
+                    name: 'lightdash_query_cache_hit_total',
                     help: 'Total number of query cache hits and misses',
                     labelNames: [
                         'result',
@@ -442,9 +506,12 @@ export default class PrometheusMetrics {
         }
     }
 
-    public incrementQueryStatus(status: QueryHistoryStatus) {
+    public incrementQueryStatus(status: QueryHistoryStatus, context: string) {
         if (this.queryStatusCounter) {
-            this.queryStatusCounter.inc({ status });
+            this.queryStatusCounter.inc({
+                status,
+                context: getQueryContextLabel(context),
+            });
         }
     }
 
@@ -679,18 +746,6 @@ export default class PrometheusMetrics {
         }
     }
 
-    public observeQueryExecutionDuration(
-        durationMs: number,
-        source: 'warehouse' | 'pre_aggregate_duckdb',
-        context: string,
-        status: 'success' | 'error',
-    ) {
-        this.queryExecutionDurationHistogram?.observe(
-            { source, context, status },
-            durationMs,
-        );
-    }
-
     public trackDuckdbResolution(
         resolved: boolean,
         reason: string | undefined,
@@ -701,7 +756,10 @@ export default class PrometheusMetrics {
             status,
             reason: resolved ? 'none' : reason || 'unknown',
         });
-        this.duckdbResolutionDurationHistogram?.observe({ status }, durationMs);
+        this.duckdbResolutionDurationHistogram?.observe(
+            { status },
+            durationMs / 1000,
+        );
     }
 
     public incrementPreAggregateFallback(reason: string) {
@@ -712,7 +770,10 @@ export default class PrometheusMetrics {
         durationMs: number,
         source: 'warehouse' | 'pre_aggregate_duckdb',
     ) {
-        this.s3ResultsUploadDurationHistogram?.observe({ source }, durationMs);
+        this.s3ResultsUploadDurationHistogram?.observe(
+            { source },
+            durationMs / 1000,
+        );
     }
 
     public incrementQueryCacheHit(
@@ -734,7 +795,7 @@ export default class PrometheusMetrics {
         }
 
         this.preAggregateActiveMaterializationsGauge = new prometheus.Gauge({
-            name: 'assessment_pre_aggregate_active_materializations',
+            name: 'lightdash_pre_aggregate_active_materializations',
             help: 'Current number of active pre-aggregate materializations',
             ...rest,
             async collect() {
@@ -774,21 +835,130 @@ export default class PrometheusMetrics {
             | QueryHistoryStatus.ERROR
             | QueryHistoryStatus.EXPIRED
             | QueryHistoryStatus.CANCELLED,
+        context: string,
     ) {
-        this.queryStateTransitionCounter?.inc({ from, to });
+        this.queryStateTransitionCounter?.inc({
+            from,
+            to,
+            context: getQueryContextLabel(context),
+        });
     }
 
-    public observeQueueWaitDuration(durationMs: number) {
-        this.queueWaitHistogram?.observe(durationMs);
+    public observeQueueWaitDuration(durationMs: number, context: string) {
+        this.queueWaitHistogram?.observe(
+            { context: getQueryContextLabel(context) },
+            durationMs / 1000,
+        );
     }
 
-    public observeQueryTotalDuration(durationMs: number) {
-        this.totalDurationHistogram?.observe(durationMs);
+    public observeQueryTotalDuration(durationMs: number, context: string) {
+        this.totalDurationHistogram?.observe(
+            { context: getQueryContextLabel(context) },
+            durationMs / 1000,
+        );
     }
 
-    public observeWarehouseDuration(durationMs: number) {
-        this.warehouseDurationHistogram?.observe(durationMs);
+    public observeWarehouseDuration(
+        durationMs: number,
+        warehouseType: string,
+        context: string,
+    ) {
+        this.warehouseDurationHistogram?.observe(
+            {
+                warehouse_type: warehouseType,
+                context: getQueryContextLabel(context),
+            },
+            durationMs / 1000,
+        );
     }
+
+    public observeOverheadDuration(durationMs: number, context: string) {
+        if (durationMs < 0) {
+            Logger.warn(
+                `Negative query overhead detected: ${durationMs}ms (context=${context}). Warehouse reported longer than wall clock.`,
+            );
+            return;
+        }
+        this.overheadDurationHistogram?.observe(
+            { context: getQueryContextLabel(context) },
+            durationMs / 1000,
+        );
+    }
+
+    public observeMaterializationPollDuration(
+        durationMs: number,
+        status: string,
+        trigger: string,
+    ) {
+        this.materializationPollDurationHistogram?.observe(
+            { status, trigger },
+            durationMs / 1000,
+        );
+    }
+
+    public observeMaterializationWarehouseDuration(
+        durationMs: number,
+        status: string,
+        trigger: string,
+    ) {
+        this.materializationWarehouseDurationHistogram?.observe(
+            { status, trigger },
+            durationMs / 1000,
+        );
+    }
+
+    public observeMaterializationPromoteDuration(
+        durationMs: number,
+        status: string,
+        trigger: string,
+    ) {
+        this.materializationPromoteDurationHistogram?.observe(
+            { status, trigger },
+            durationMs / 1000,
+        );
+    }
+
+    public observeMaterializationFileSize(
+        totalBytes: number,
+        format: 'jsonl' | 'parquet',
+    ) {
+        this.preAggregateMaterializationFileSizeHistogram?.observe(
+            { format },
+            totalBytes,
+        );
+    }
+
+    public observeParquetConversionDuration(
+        durationMs: number,
+        status: 'success' | 'error',
+    ) {
+        this.preAggregateParquetConversionDurationHistogram?.observe(
+            { status },
+            durationMs / 1000,
+        );
+    }
+
+    public observeDuckdbQueryProfile = (profile: {
+        latencyMs: number;
+        readParquetMs: number | null;
+        bytesRead: number | null;
+        scanAmplification: number | null;
+    }) => {
+        this.duckdbQueryLatencyHistogram?.observe(profile.latencyMs / 1000);
+        if (profile.readParquetMs != null) {
+            this.duckdbParquetReadDurationHistogram?.observe(
+                profile.readParquetMs / 1000,
+            );
+        }
+        if (profile.bytesRead != null) {
+            this.duckdbBytesReadHistogram?.observe(profile.bytesRead);
+        }
+        if (profile.scanAmplification != null) {
+            this.duckdbScanAmplificationHistogram?.observe(
+                profile.scanAmplification,
+            );
+        }
+    };
 
     public monitorEventMetrics(eventEmitter: EventEmitter) {
         if (!this.config.enabled || !this.config.eventMetricsEnabled) {

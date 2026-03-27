@@ -1,5 +1,6 @@
 import { Ability } from '@casl/ability';
 import {
+    ContentType,
     defineUserAbility,
     ForbiddenError,
     OrganizationMemberRole,
@@ -12,6 +13,7 @@ import { SlackClient } from '../../clients/Slack/SlackClient';
 import { lightdashConfigMock } from '../../config/lightdashConfig.mock';
 import { AnalyticsModel } from '../../models/AnalyticsModel';
 import type { CatalogModel } from '../../models/CatalogModel/CatalogModel';
+import { ContentVerificationModel } from '../../models/ContentVerificationModel';
 import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
 import { PinnedListModel } from '../../models/PinnedListModel';
 import type { ProjectModel } from '../../models/ProjectModel/ProjectModel';
@@ -19,6 +21,7 @@ import { SavedChartModel } from '../../models/SavedChartModel';
 import { SchedulerModel } from '../../models/SchedulerModel';
 import { SpaceModel } from '../../models/SpaceModel';
 import { SchedulerClient } from '../../scheduler/SchedulerClient';
+import { FeatureFlagService } from '../FeatureFlag/FeatureFlagService';
 import { SavedChartService } from '../SavedChartsService/SavedChartService';
 import type { SchedulerService } from '../SchedulerService/SchedulerService';
 import { SpacePermissionService } from '../SpaceService/SpacePermissionService';
@@ -69,6 +72,10 @@ const savedChartModel = {
         uuid: 'chart_uuid',
         projectUuid: 'project_uuid',
     })),
+};
+
+const contentVerificationModel = {
+    unverify: jest.fn(async () => undefined),
 };
 
 const spaceContexts = {
@@ -131,6 +138,9 @@ describe('DashboardService', () => {
         catalogModel: {} as CatalogModel,
         spacePermissionService:
             spacePermissionService as unknown as SpacePermissionService,
+        contentVerificationModel:
+            contentVerificationModel as unknown as ContentVerificationModel,
+        featureFlagService: {} as FeatureFlagService,
     });
     afterEach(() => {
         jest.clearAllMocks();
@@ -449,5 +459,21 @@ describe('DashboardService', () => {
         );
 
         expect(result).toEqual([]);
+    });
+    test('should auto-unverify dashboard when details are updated', async () => {
+        await service.update(user, dashboardUuid, updateDashboard);
+
+        expect(contentVerificationModel.unverify).toHaveBeenCalledWith(
+            ContentType.DASHBOARD,
+            dashboardUuid,
+        );
+    });
+    test('should auto-unverify dashboard when tiles are updated', async () => {
+        await service.update(user, dashboardUuid, updateDashboardTiles);
+
+        expect(contentVerificationModel.unverify).toHaveBeenCalledWith(
+            ContentType.DASHBOARD,
+            dashboardUuid,
+        );
     });
 });

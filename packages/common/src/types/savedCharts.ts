@@ -3,6 +3,7 @@ import { type ViewStatistics } from './analytics';
 import { type DateZoom } from './api/paginatedQuery';
 import { type ConditionalFormattingConfig } from './conditionalFormatting';
 import { type ChartSourceType } from './content';
+import { type ContentVerificationInfo } from './contentVerification';
 import { type CompactOrAlias, type FieldId } from './field';
 import { type KnexPaginatedData } from './knex-paginate';
 import { type MetricQuery, type MetricQueryRequest } from './metricQuery';
@@ -355,6 +356,15 @@ export type ColumnProperties = {
     width?: number;
 };
 
+export type RowLimit = {
+    /** Whether to show or hide the selected rows */
+    mode: 'show' | 'hide';
+    /** Whether to target the first or last N rows */
+    direction: 'first' | 'last';
+    /** Number of rows to show or hide */
+    count: number;
+};
+
 export type TableChart = {
     /** Show column totals/calculations */
     showColumnCalculation?: boolean;
@@ -374,6 +384,8 @@ export type TableChart = {
     conditionalFormattings?: ConditionalFormattingConfig[];
     /** Display metrics as rows instead of columns */
     metricsAsRows?: boolean;
+    /** Limit displayed rows to first/last N */
+    rowLimit?: RowLimit;
 };
 
 export enum CartesianSeriesType {
@@ -693,6 +705,8 @@ export type CartesianChart = {
     eChartsConfig: EChartsConfig;
     /** Metadata for series (colors, etc.) */
     metadata?: Record<string, SeriesMetadata>;
+    /** Limit displayed rows to first/last N */
+    rowLimit?: RowLimit;
 };
 
 export type BigNumberConfig = {
@@ -824,6 +838,7 @@ export type SavedChart = {
     access: SpaceAccess[];
     /** Unique identifier slug for this chart */
     slug: string;
+    verification: ContentVerificationInfo | null;
     deletedAt?: Date;
     deletedBy?: {
         userUuid: string;
@@ -875,6 +890,7 @@ export type CreateSavedChartVersion = Omit<
     | 'inheritsFromOrgOrProject'
     | 'access'
     | 'slug'
+    | 'verification'
 > &
     // For Charts created within a dashboard
     Partial<Pick<SavedChart, 'dashboardUuid' | 'dashboardName'>>;
@@ -1102,6 +1118,7 @@ export type SpaceQuery = ChartSummary &
     Pick<SavedChart, 'updatedAt' | 'updatedByUser' | 'pinnedListOrder'> &
     ViewStatistics & {
         validationErrors?: ValidationSummary[];
+        verification: ContentVerificationInfo | null;
     };
 
 export type ApiChartSummaryListResponse = {

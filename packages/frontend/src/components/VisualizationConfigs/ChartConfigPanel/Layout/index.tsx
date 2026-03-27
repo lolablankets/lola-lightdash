@@ -1,5 +1,6 @@
 import {
     CartesianSeriesType,
+    FeatureFlags,
     getItemId,
     isCustomDimension,
     isDimension,
@@ -22,12 +23,14 @@ import {
 import { IconRotate360 } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { EMPTY_X_AXIS } from '../../../../hooks/cartesianChartConfig/useCartesianChartConfig';
+import { useServerFeatureFlag } from '../../../../hooks/useServerOrClientFeatureFlag';
 import FieldSelect from '../../../common/FieldSelect';
 import MantineIcon from '../../../common/MantineIcon';
 import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/types';
 import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
 import { AddButton } from '../../common/AddButton';
 import { Config } from '../../common/Config';
+import { RowLimitControls } from '../../common/RowLimitControls';
 import { MAX_PIVOTS } from '../../TableConfigPanel/constants';
 
 type Props = {
@@ -37,6 +40,10 @@ type Props = {
 export const Layout: FC<Props> = ({ items }) => {
     const { visualizationConfig, pivotDimensions, setPivotDimensions } =
         useVisualizationContext();
+    const { data: showHideRowsFlag } = useServerFeatureFlag(
+        FeatureFlags.ShowHideRows,
+    );
+    const isShowHideRowsEnabled = showHideRowsFlag?.enabled ?? false;
 
     const isCartesianChart =
         isCartesianVisualizationConfig(visualizationConfig);
@@ -192,6 +199,8 @@ export const Layout: FC<Props> = ({ items }) => {
         updateYField,
         removeSingleSeries,
         addSingleSeries,
+        rowLimit,
+        setRowLimit,
     } = visualizationConfig.chartConfig;
 
     return (
@@ -465,6 +474,18 @@ export const Layout: FC<Props> = ({ items }) => {
                     )}
                 </Config.Section>
             </Config>
+
+            {isShowHideRowsEnabled && (
+                <Config>
+                    <Config.Section>
+                        <Config.Heading>Data</Config.Heading>
+                        <RowLimitControls
+                            rowLimit={rowLimit}
+                            onRowLimitChange={setRowLimit}
+                        />
+                    </Config.Section>
+                </Config>
+            )}
         </Stack>
     );
 };

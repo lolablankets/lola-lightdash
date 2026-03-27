@@ -4,6 +4,7 @@ import {
     isField,
     type AndFilterGroup,
     type ApiError,
+    type DashboardFilterRule,
     type FieldValueSearchResult,
     type FilterableItem,
     type ParametersValuesMap,
@@ -16,6 +17,27 @@ import useEmbed from '../ee/providers/Embed/useEmbed';
 
 export const MAX_AUTOCOMPLETE_RESULTS = 50;
 
+/**
+ * Strip tileTargets from filter rules before sending to the API.
+ * tileTargets are only used client-side to determine filter-tile relationships
+ * and can be very large (100+ entries per filter), bloating the request payload.
+ */
+const stripTileTargetsFromFilters = (
+    filters: AndFilterGroup | undefined,
+): AndFilterGroup | undefined => {
+    if (!filters) return undefined;
+    return {
+        ...filters,
+        and: filters.and.map((rule) => {
+            if ('tileTargets' in rule) {
+                const { tileTargets, ...rest } = rule as DashboardFilterRule;
+                return rest;
+            }
+            return rule;
+        }),
+    };
+};
+
 const getEmbedFilterValues = async (options: {
     embedToken: string;
     projectId: string;
@@ -23,6 +45,8 @@ const getEmbedFilterValues = async (options: {
     search: string;
     forceRefresh: boolean;
     filters: AndFilterGroup | undefined;
+    tableName: string | undefined;
+    fieldId: string | undefined;
 }) => {
     return lightdashApi<FieldValueSearchResult>({
         url: `/embed/${options.projectId}/filter/${options.filterId}/search`,
@@ -30,8 +54,10 @@ const getEmbedFilterValues = async (options: {
         body: JSON.stringify({
             search: options.search,
             limit: MAX_AUTOCOMPLETE_RESULTS,
-            filters: options.filters,
+            filters: stripTileTargetsFromFilters(options.filters),
             forceRefresh: options.forceRefresh,
+            tableName: options.tableName,
+            fieldId: options.fieldId,
         }),
     });
 };
@@ -57,7 +83,7 @@ const getFieldValues = async (
             search,
             limit,
             table,
-            filters,
+            filters: stripTileTargetsFromFilters(filters),
             forceRefresh,
             parameters: parameterValues,
         }),
@@ -139,6 +165,8 @@ export const useFieldValues = (
                     search: debouncedSearch,
                     forceRefresh,
                     filters,
+                    tableName,
+                    fieldId,
                 });
             } else {
                 return getFieldValues(

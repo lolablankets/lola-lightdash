@@ -2,19 +2,20 @@ import { MissingConfigError } from '@lightdash/common';
 import { LightdashAnalytics } from '../analytics/LightdashAnalytics';
 import { ClientRepository } from '../clients/ClientRepository';
 import { LightdashConfig } from '../config/parseConfig';
+import { PreAggregateMaterializationService } from '../ee/services/PreAggregateMaterializationService/PreAggregateMaterializationService';
 import { ModelRepository } from '../models/ModelRepository';
 import PrometheusMetrics from '../prometheus/PrometheusMetrics';
 import type { UtilRepository } from '../utils/UtilRepository';
 import { AdminNotificationService } from './AdminNotificationService/AdminNotificationService';
 import { AnalyticsService } from './AnalyticsService/AnalyticsService';
 import { AsyncQueryService } from './AsyncQueryService/AsyncQueryService';
-import { PreAggregationDuckDbClient } from './AsyncQueryService/PreAggregationDuckDbClient';
 import { BaseService } from './BaseService';
 import { CatalogService } from './CatalogService/CatalogService';
 import { ChangesetService } from './ChangesetService';
 import { CoderService } from './CoderService/CoderService';
 import { CommentService } from './CommentService/CommentService';
 import { ContentService } from './ContentService/ContentService';
+import { ContentVerificationService } from './ContentVerificationService';
 import { CsvService } from './CsvService/CsvService';
 import { DashboardService } from './DashboardService/DashboardService';
 import { DeployService } from './DeployService';
@@ -38,7 +39,6 @@ import { PersistentDownloadFileService } from './PersistentDownloadFileService/P
 import { PersonalAccessTokenService } from './PersonalAccessTokenService';
 import { PinningService } from './PinningService/PinningService';
 import { PivotTableService } from './PivotTableService/PivotTableService';
-import { PreAggregateMaterializationService } from './PreAggregateMaterializationService/PreAggregateMaterializationService';
 import { ProjectCompileLogService } from './ProjectCompileLogService/ProjectCompileLogService';
 import { ProjectParametersService } from './ProjectParametersService';
 import { ProjectService } from './ProjectService/ProjectService';
@@ -107,6 +107,7 @@ interface ServiceManifest {
     promoteService: PromoteService;
     savedSqlService: SavedSqlService;
     contentService: ContentService;
+    contentVerificationService: ContentVerificationService;
     coderService: CoderService;
     featureFlagService: FeatureFlagService;
     funnelService: FunnelService;
@@ -118,6 +119,7 @@ interface ServiceManifest {
     projectCompileLogService: ProjectCompileLogService;
     permissionsService: PermissionsService;
     /** An implementation signature for these services are not available at this stage */
+    appGenerateService: unknown;
     embedService: unknown;
     aiService: unknown;
     aiAgentService: unknown;
@@ -362,6 +364,9 @@ export class ServiceRepository
                     slackClient: this.clients.getSlackClient(),
                     catalogModel: this.models.getCatalogModel(),
                     spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
+                    featureFlagService: this.getFeatureFlagService(),
                 }),
         );
     }
@@ -645,6 +650,8 @@ export class ServiceRepository
                     adminNotificationService:
                         this.getAdminNotificationService(),
                     spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
                 }),
         );
     }
@@ -684,14 +691,10 @@ export class ServiceRepository
                     encryptionUtil: this.utils.getEncryptionUtil(),
                     userModel: this.models.getUserModel(),
                     queryHistoryModel: this.models.getQueryHistoryModel(),
-                    preAggregateDailyStatsModel:
-                        this.models.getPreAggregateDailyStatsModel(),
                     downloadAuditModel: this.models.getDownloadAuditModel(),
                     savedSqlModel: this.models.getSavedSqlModel(),
                     resultsStorageClient:
                         this.clients.getResultsFileStorageClient(),
-                    preAggregateResultsStorageClient:
-                        this.clients.getPreAggregateResultsFileStorageClient(),
                     featureFlagModel: this.models.getFeatureFlagModel(),
                     projectParametersModel:
                         this.models.getProjectParametersModel(),
@@ -702,12 +705,6 @@ export class ServiceRepository
                     permissionsService: this.getPermissionsService(),
                     persistentDownloadFileService:
                         this.getPersistentDownloadFileService(),
-                    preAggregationDuckDbClient: new PreAggregationDuckDbClient({
-                        lightdashConfig: this.context.lightdashConfig,
-                        preAggregateModel: this.models.getPreAggregateModel(),
-                        projectModel: this.models.getProjectModel(),
-                        prometheusMetrics: this.prometheusMetrics,
-                    }),
                     projectCompileLogModel:
                         this.models.getProjectCompileLogModel(),
                     adminNotificationService:
@@ -739,6 +736,9 @@ export class ServiceRepository
                     googleDriveClient: this.clients.getGoogleDriveClient(),
                     userService: this.getUserService(),
                     spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
+                    featureFlagService: this.getFeatureFlagService(),
                 }),
         );
     }
@@ -752,6 +752,7 @@ export class ServiceRepository
                     analytics: this.context.lightdashAnalytics,
                     schedulerModel: this.models.getSchedulerModel(),
                     savedChartModel: this.models.getSavedChartModel(),
+                    savedSqlModel: this.models.getSavedSqlModel(),
                     dashboardModel: this.models.getDashboardModel(),
                     projectModel: this.models.getProjectModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
@@ -942,6 +943,8 @@ export class ServiceRepository
                     schedulerClient: this.clients.getSchedulerClient(),
                     promoteService: this.getPromoteService(),
                     spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
                 }),
         );
     }
@@ -1033,6 +1036,7 @@ export class ServiceRepository
                     projectModel: this.models.getProjectModel(),
                     savedSqlModel: this.models.getSavedSqlModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
+                    schedulerModel: this.models.getSchedulerModel(),
                     analyticsModel: this.models.getAnalyticsModel(),
                     spacePermissionService: this.getSpacePermissionService(),
                 }),
@@ -1053,6 +1057,19 @@ export class ServiceRepository
                     savedChartService: this.getSavedChartService(),
                     savedSqlService: this.getSavedSqlService(),
                     spacePermissionService: this.getSpacePermissionService(),
+                }),
+        );
+    }
+
+    public getContentVerificationService(): ContentVerificationService {
+        return this.getService(
+            'contentVerificationService',
+            () =>
+                new ContentVerificationService({
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
+                    projectModel: this.models.getProjectModel(),
+                    featureFlagService: this.getFeatureFlagService(),
                 }),
         );
     }
@@ -1095,6 +1112,12 @@ export class ServiceRepository
                     projectService: this.getProjectService(),
                 }),
         );
+    }
+
+    public getAppGenerateService<
+        AppGenerateServiceImplT,
+    >(): AppGenerateServiceImplT {
+        return this.getService('appGenerateService');
     }
 
     public getEmbedService<EmbedServiceImplT>(): EmbedServiceImplT {

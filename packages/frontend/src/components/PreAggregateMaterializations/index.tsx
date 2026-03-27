@@ -32,9 +32,10 @@ import {
     IconExternalLink,
     IconFile,
     IconFilter,
+    IconFilterExclamation,
     IconFilterOff,
     IconHourglass,
-    IconRefresh,
+    IconRefreshDot,
     IconRowInsertBottom,
     IconSearch,
     IconTable,
@@ -81,7 +82,7 @@ type StatusType = PreAggregateMaterializationStatus;
 
 const STATUS_LABELS: Record<StatusType, string> = {
     active: 'Active',
-    in_progress: 'In progress',
+    in_progress: 'Building',
     failed: 'Failed',
     superseded: 'Superseded',
 };
@@ -340,22 +341,35 @@ const PreAggregateMaterializations: FC<Props> = ({ projectUuid }) => {
                         (w: PreAggregateMaterializationWarning) =>
                             w.type === 'row_count_exceeded',
                     );
+                    const hasRowLimitWarning = row.original.warnings.some(
+                        (w: PreAggregateMaterializationWarning) =>
+                            w.type === 'max_rows_applied',
+                    );
                     return (
                         <Group gap={4} wrap="nowrap">
-                            <Text
-                                size="xs"
-                                c={hasRowCountWarning ? 'yellow.7' : 'ldGray.6'}
-                                ff="monospace"
-                            >
+                            <Text size="xs" c="ldGray.6" ff="monospace">
                                 {rowCount != null
                                     ? rowCount.toLocaleString()
                                     : '\u2014'}
                             </Text>
+                            {hasRowLimitWarning && (
+                                <Tooltip
+                                    label="Max rows applied"
+                                    withArrow
+                                    position="top"
+                                >
+                                    <MantineIcon
+                                        icon={IconFilterExclamation}
+                                        size="sm"
+                                        color="ldGray.6"
+                                    />
+                                </Tooltip>
+                            )}
                             {hasRowCountWarning && (
                                 <MantineIcon
                                     icon={IconAlertTriangle}
                                     size="sm"
-                                    color="yellow.6"
+                                    color="ldGray.6"
                                 />
                             )}
                         </Group>
@@ -519,7 +533,7 @@ const PreAggregateMaterializations: FC<Props> = ({ projectUuid }) => {
                         refreshingDefinitionName ===
                             row.original.preAggregateName;
                     return (
-                        <Tooltip label="Refresh this pre-aggregate">
+                        <Tooltip label="Rebuild this pre-aggregate">
                             <ActionIcon
                                 variant="subtle"
                                 color="gray"
@@ -532,7 +546,7 @@ const PreAggregateMaterializations: FC<Props> = ({ projectUuid }) => {
                                     );
                                 }}
                             >
-                                <MantineIcon icon={IconRefresh} size="sm" />
+                                <MantineIcon icon={IconRefreshDot} size="sm" />
                             </ActionIcon>
                         </Tooltip>
                     );
@@ -714,12 +728,12 @@ const PreAggregateMaterializations: FC<Props> = ({ projectUuid }) => {
                         <Button
                             size="xs"
                             leftSection={
-                                <MantineIcon icon={IconRefresh} size="sm" />
+                                <MantineIcon icon={IconRefreshDot} size="sm" />
                             }
                             loading={isRefreshingAll || hasActiveJobs}
                             onClick={handleRefreshAllClick}
                         >
-                            Refresh all
+                            Rebuild all
                         </Button>
                     </Group>
                 </Group>
@@ -752,13 +766,13 @@ const PreAggregateMaterializations: FC<Props> = ({ projectUuid }) => {
             <MantineModal
                 opened={isRefreshModalOpen}
                 onClose={closeRefreshModal}
-                title="Refresh all pre-aggregates"
-                icon={IconRefresh}
+                title="Rebuild all pre-aggregates"
+                icon={IconRefreshDot}
                 size="lg"
                 onConfirm={handleRefreshAllConfirm}
-                confirmLabel="Refresh all"
+                confirmLabel="Rebuild all"
                 confirmLoading={isRefreshingAll}
-                description="This will refresh all pre-aggregate definitions in this project by re-running their warehouse queries to rebuild the cached data."
+                description="This will rebuild all pre-aggregate definitions in this project by re-running their warehouse queries to regenerate the cached data."
             >
                 <Stack gap="sm">
                     <Text fz="xs" c="ldGray.6">

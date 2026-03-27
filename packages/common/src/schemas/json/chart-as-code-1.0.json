@@ -726,6 +726,35 @@
                 }
             ]
         },
+        "ContentAsCodeType.CHART": {
+            "enum": ["chart"],
+            "type": "string"
+        },
+        "ContentVerificationInfo": {
+            "properties": {
+                "verifiedAt": {
+                    "format": "date-time",
+                    "type": "string"
+                },
+                "verifiedBy": {
+                    "properties": {
+                        "firstName": {
+                            "type": "string"
+                        },
+                        "lastName": {
+                            "type": "string"
+                        },
+                        "userUuid": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["lastName", "firstName", "userUuid"],
+                    "type": "object"
+                }
+            },
+            "required": ["verifiedAt", "verifiedBy"],
+            "type": "object"
+        },
         "CustomBinDimension": {
             "anyOf": [
                 {
@@ -3160,6 +3189,10 @@
             ],
             "type": "object"
         },
+        "contentType": {
+            "$ref": "#/$defs/ContentAsCodeType.CHART",
+            "description": "Content type discriminator"
+        },
         "dashboardSlug": {
             "description": "Slug of the dashboard this chart belongs to (if any)",
             "oneOf": [
@@ -3249,6 +3282,21 @@
             "description": "Not modifiable by user, but useful to know if it has been updated. Defaults to now if omitted.",
             "format": "date-time",
             "type": "string"
+        },
+        "verification": {
+            "anyOf": [
+                {
+                    "allOf": [
+                        {
+                            "$ref": "#/$defs/ContentVerificationInfo"
+                        }
+                    ],
+                    "description": "Verification status of this chart. Read-only; ignored on upload."
+                },
+                {
+                    "type": "null"
+                }
+            ]
         },
         "version": {
             "const": 1,

@@ -36,7 +36,6 @@ import {
     useChartVersionRollbackMutation,
     useSavedQuery,
 } from '../hooks/useSavedQuery';
-import { useSlugRedirect } from '../hooks/useSlugRedirect';
 import { Can } from '../providers/Ability';
 import { ExplorerSection } from '../providers/Explorer/types';
 import NoTableIcon from '../svgs/emptystate-no-table.svg?react';
@@ -69,6 +68,7 @@ const ChartHistoryExplorer = memo<{ selectedVersionUuid: string | undefined }>(
                     parameterDefinitions: {},
                     expandedSections: [ExplorerSection.VISUALIZATION],
                     unsavedChartVersion: chartVersionQuery.data.chart,
+                    savedChart: chartVersionQuery.data.chart,
                     modals: {
                         format: { isOpen: false },
                         additionalMetric: { isOpen: false },
@@ -78,7 +78,6 @@ const ChartHistoryExplorer = memo<{ selectedVersionUuid: string | undefined }>(
                         periodOverPeriodComparison: { isOpen: false },
                     },
                 },
-                savedChart: chartVersionQuery.data.chart,
             });
 
             store.dispatch(explorerActions.reset(initialState));
@@ -110,8 +109,6 @@ const ChartHistory = () => {
         projectUuid,
     });
     const historyQuery = useChartHistory(savedQueryUuid);
-
-    useSlugRedirect(savedQueryUuid, chartQuery.data?.uuid);
 
     useEffect(() => {
         const currentVersion = historyQuery.data?.history[0];

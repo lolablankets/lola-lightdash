@@ -7,7 +7,9 @@ import {
     AuthTokenPrefix,
     cleanColorArray,
     CreateDatabricksCredentials,
+    CreateWarehouseCredentials,
     DbtGithubProjectConfig,
+    DbtProjectConfig,
     DbtProjectType,
     DbtVersionOption,
     DbtVersionOptionLatest,
@@ -28,6 +30,7 @@ import {
 } from '@lightdash/common';
 import * as Sentry from '@sentry/core';
 import { type ClientAuthMethod } from 'openid-client';
+import { z } from 'zod';
 import { VERSION } from '../version';
 import {
     aiCopilotConfigSchema,
@@ -323,6 +326,120 @@ const parseEnum = <T>(
     return value as T;
 };
 
+const multiProjectSetupEntrySchema = z.object({
+    name: z.string().min(1, 'Project name cannot be empty'),
+    warehouseConnection: z
+        .object({
+            type: z.nativeEnum(WarehouseTypes, {
+                errorMap: () => ({
+                    message: `Invalid warehouse type. Must be one of: ${Object.values(WarehouseTypes).join(', ')}`,
+                }),
+            }),
+        })
+        .passthrough(),
+    dbtConnection: z
+        .object({
+            type: z.nativeEnum(DbtProjectType, {
+                errorMap: () => ({
+                    message: `Invalid dbt connection type. Must be one of: ${Object.values(DbtProjectType).join(', ')}`,
+                }),
+            }),
+        })
+        .passthrough(),
+    dbtVersion: z.nativeEnum(SupportedDbtVersions).optional(),
+    embed: z
+        .object({
+            secret: z.string().optional(),
+            allowAllDashboards: z.boolean().optional(),
+        })
+        .optional(),
+});
+
+const multiProjectSetupSchema = z.array(multiProjectSetupEntrySchema).refine(
+    (entries) => {
+        const names = entries.map((e) => e.name);
+        return new Set(names).size === names.length;
+    },
+    (entries) => {
+        const names = entries.map((e) => e.name);
+        const duplicate = names.find((name, i) => names.indexOf(name) !== i);
+        return {
+            message: `Duplicate project name "${duplicate}" in LD_SETUP_PROJECTS`,
+        };
+    },
+);
+
+export const getMultiProjectSetupConfig = ():
+    | MultiProjectSetupEntry[]
+    | undefined => {
+    const raw = process.env.LD_SETUP_PROJECTS;
+    if (!raw) return undefined;
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        throw new ParseError(
+            `Failed to parse LD_SETUP_PROJECTS: ${getErrorMessage(e)}`,
+        );
+    }
+
+    if (Array.isArray(parsed) && parsed.length === 0) {
+        return undefined;
+    }
+
+    const result = multiProjectSetupSchema.safeParse(parsed);
+    if (!result.success) {
+        const errorDetails = result.error.errors
+            .map((err) => {
+                const path =
+                    err.path.length > 0
+                        ? `  - ${err.path.join('.')}: ${err.message}`
+                        : `  - ${err.message}`;
+                return path;
+            })
+            .join('\n');
+
+        const exampleConfig = JSON.stringify(
+            [
+                {
+                    name: 'My Project',
+                    warehouseConnection: {
+                        type: 'postgres',
+                        host: 'db.example.com',
+                        port: 5432,
+                        user: 'user',
+                        password: 'password',
+                        dbname: 'mydb',
+                        schema: 'public',
+                    },
+                    dbtConnection: {
+                        type: 'github',
+                        authorization_method: 'personal_access_token',
+                        personal_access_token: 'ghp_...',
+                        repository: 'org/repo',
+                        branch: 'main',
+                        project_sub_path: '/',
+                    },
+                },
+            ],
+            null,
+            2,
+        );
+
+        throw new ParseError(
+            `Invalid LD_SETUP_PROJECTS:\n${errorDetails}\n\n` +
+                `Warehouse types: ${Object.values(WarehouseTypes).join(', ')}\n` +
+                `dbt connection types: ${Object.values(DbtProjectType).join(', ')}\n\n` +
+                `Example:\n${exampleConfig}\n\n` +
+                `See https://docs.lightdash.com/self-host/customize-deployment/environment-variables#initialize-instance for details.`,
+        );
+    }
+
+    // Zod validates structure; the full type comes from the original parsed JSON
+    return parsed as MultiProjectSetupEntry[];
+};
+
 const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
     const parseCompute = (): CreateDatabricksCredentials['compute'] => {
         // This is a stringified array of objects, in JSON format
@@ -335,12 +452,55 @@ const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
     try {
         if (!process.env.LD_SETUP_ADMIN_EMAIL) return undefined;
 
-        const projectPat = process.env.LD_SETUP_PROJECT_PAT;
-        if (!projectPat) {
-            throw new ParameterError(
-                `LD_SETUP_PROJECT_PAT is required for initial setup`,
-                { variant: 'ApiToken' },
-            );
+        // Build project list: either from LD_SETUP_PROJECTS or legacy single-project env vars
+        const multiProjectConfig = getMultiProjectSetupConfig();
+        let projects: MultiProjectSetupEntry[];
+
+        if (multiProjectConfig) {
+            projects = multiProjectConfig;
+        } else {
+            const projectPat = process.env.LD_SETUP_PROJECT_PAT;
+            if (!projectPat) {
+                throw new ParameterError(
+                    `LD_SETUP_PROJECT_PAT is required for initial setup. Set LD_SETUP_PROJECT_PAT for single-project setup, or use LD_SETUP_PROJECTS for multi-project setup.`,
+                    { variant: 'ApiToken' },
+                );
+            }
+
+            projects = [
+                {
+                    name: process.env.LD_SETUP_PROJECT_NAME!,
+                    warehouseConnection: {
+                        type: WarehouseTypes.DATABRICKS,
+                        catalog: process.env.LD_SETUP_PROJECT_CATALOG,
+                        database: process.env.LD_SETUP_PROJECT_SCHEMA!,
+                        serverHostName: process.env.LD_SETUP_PROJECT_HOST!,
+                        httpPath: process.env.LD_SETUP_PROJECT_HTTP_PATH!,
+                        personalAccessToken: projectPat,
+                        requireUserCredentials: undefined,
+                        startOfWeek: parseEnum<WeekDay>(
+                            process.env.LD_SETUP_START_OF_WEEK,
+                            WeekDay,
+                        ),
+                        compute: parseCompute(),
+                    },
+                    dbtConnection: {
+                        type: DbtProjectType.GITHUB,
+                        authorization_method: 'personal_access_token',
+                        personal_access_token: process.env.LD_SETUP_GITHUB_PAT!,
+                        repository: process.env.LD_SETUP_GITHUB_REPOSITORY!,
+                        branch: process.env.LD_SETUP_GITHUB_BRANCH!,
+                        project_sub_path:
+                            process.env.LD_SETUP_GITHUB_PATH || '/',
+                        host_domain: undefined,
+                    },
+                    dbtVersion:
+                        parseEnum<SupportedDbtVersions>(
+                            process.env.LD_SETUP_DBT_VERSION,
+                            SupportedDbtVersions,
+                        ) || DbtVersionOptionLatest.LATEST,
+                },
+            ];
         }
 
         return {
@@ -378,35 +538,7 @@ const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
                       ),
                   }
                 : undefined,
-            project: {
-                name: process.env.LD_SETUP_PROJECT_NAME!,
-                type: WarehouseTypes.DATABRICKS,
-                catalog: process.env.LD_SETUP_PROJECT_CATALOG,
-                database: process.env.LD_SETUP_PROJECT_SCHEMA!,
-                serverHostName: process.env.LD_SETUP_PROJECT_HOST!,
-                httpPath: process.env.LD_SETUP_PROJECT_HTTP_PATH!,
-                personalAccessToken: projectPat,
-                requireUserCredentials: undefined,
-                startOfWeek: parseEnum<WeekDay>(
-                    process.env.LD_SETUP_START_OF_WEEK,
-                    WeekDay,
-                ),
-                compute: parseCompute(),
-                dbtVersion:
-                    parseEnum<SupportedDbtVersions>(
-                        process.env.LD_SETUP_DBT_VERSION,
-                        SupportedDbtVersions,
-                    ) || DbtVersionOptionLatest.LATEST,
-            },
-            dbt: {
-                type: DbtProjectType.GITHUB,
-                authorization_method: 'personal_access_token',
-                personal_access_token: process.env.LD_SETUP_GITHUB_PAT!,
-                repository: process.env.LD_SETUP_GITHUB_REPOSITORY!,
-                branch: process.env.LD_SETUP_GITHUB_BRANCH!,
-                project_sub_path: process.env.LD_SETUP_GITHUB_PATH || '/',
-                host_domain: undefined,
-            },
+            projects,
         };
     } catch (e) {
         // If a variable is not set, we will skip the initial setup
@@ -481,6 +613,7 @@ export const getUpdateSetupConfig = (): LightdashConfig['updateSetup'] => {
         dbt: {
             personal_access_token: process.env.LD_SETUP_GITHUB_PAT,
         },
+        projects: getMultiProjectSetupConfig(),
         embed: {
             allowAllDashboards:
                 process.env.LD_SETUP_EMBED_ALLOW_ALL_DASHBOARDS === 'true',
@@ -811,6 +944,17 @@ export type LoggingConfig = {
     filePath: string;
 };
 
+export type MultiProjectSetupEntry = {
+    name: string;
+    warehouseConnection: CreateWarehouseCredentials;
+    dbtConnection: DbtProjectConfig;
+    dbtVersion?: DbtVersionOption;
+    embed?: {
+        secret?: string;
+        allowAllDashboards?: boolean;
+    };
+};
+
 export type LightdashConfig = {
     lightdashSecret: string;
     secureCookies: boolean;
@@ -1025,11 +1169,7 @@ export type LightdashConfig = {
             token: string;
             expirationTime: Date | null;
         };
-        project: CreateDatabricksCredentials & {
-            name: string;
-            dbtVersion: DbtVersionOption;
-        };
-        dbt: DbtGithubProjectConfig;
+        projects: MultiProjectSetupEntry[];
     };
     updateSetup?: {
         organizationUuid?: string;
@@ -1053,6 +1193,7 @@ export type LightdashConfig = {
             dbtVersion?: DbtVersionOption;
             personalAccessToken?: CreateDatabricksCredentials['personalAccessToken'];
         };
+        projects?: MultiProjectSetupEntry[];
         serviceAccount?: {
             token: string;
             expirationTime: Date | null;
@@ -1106,11 +1247,18 @@ export type LightdashConfig = {
     preAggregates: {
         enabled: boolean;
         parquetEnabled: boolean;
+        materializationMaxRows: number | null;
+        /** Max memory DuckDB can use for caching parquet data and query intermediates on the shared query instance (e.g. '256MB', '1GB', '2GB'). Only affects pre-aggregate reads, not materializations which use isolated instances. */
+        duckdbQueryMemoryLimit: string | null;
         s3?: Omit<S3Config, 'expirationTime'>;
     };
     userImpersonation: {
         enabled: boolean | undefined;
     };
+    changeChartExplore: {
+        enabled: boolean | undefined;
+    };
+    appRuntime: AppRuntimeConfig;
 };
 
 export type SlackConfig = {
@@ -1152,6 +1300,15 @@ export type S3Config = {
      */
     useCredentialsFrom?: string[];
 };
+export type AppRuntimeConfig = {
+    enabled: boolean;
+    lightdashOrigin: string;
+    cdnOrigin: string | null;
+    previewOrigin: string | null;
+    s3: S3Config | null;
+    e2bApiKey: string | null;
+};
+
 export type IntercomConfig = {
     appId: string;
     apiBase: string;
@@ -1312,6 +1469,51 @@ export type SmtpConfig = {
 };
 
 const DEFAULT_JOB_TIMEOUT = 1000 * 60 * 10; // 10 minutes
+
+const parseAppRuntimeConfig = (siteUrl: string): AppRuntimeConfig => {
+    const enabled = process.env.APPS_RUNTIME_ENABLED === 'true';
+    const appsBucket = process.env.APPS_S3_BUCKET;
+
+    const baseS3Config = parseBaseS3Config();
+
+    let s3: S3Config | null = null;
+
+    if (baseS3Config) {
+        const {
+            endpoint: baseEndpoint,
+            bucket: baseBucket,
+            region: baseRegion,
+            accessKey: baseAccessKey,
+            secretKey: baseSecretKey,
+            forcePathStyle: baseForcePathStyle,
+            useCredentialsFrom: baseUseCredentialsFrom,
+        } = baseS3Config;
+
+        const bucket = appsBucket || baseBucket;
+        const region = process.env.APPS_S3_REGION || baseRegion;
+        const accessKey = process.env.APPS_S3_ACCESS_KEY || baseAccessKey;
+        const secretKey = process.env.APPS_S3_SECRET_KEY || baseSecretKey;
+
+        s3 = {
+            endpoint: baseEndpoint,
+            forcePathStyle: baseForcePathStyle,
+            bucket,
+            region,
+            accessKey,
+            secretKey,
+            useCredentialsFrom: baseUseCredentialsFrom,
+        };
+    }
+
+    return {
+        enabled,
+        lightdashOrigin: process.env.APP_RUNTIME_LIGHTDASH_ORIGIN || siteUrl,
+        cdnOrigin: process.env.APP_RUNTIME_CDN_ORIGIN || null,
+        previewOrigin: process.env.APP_RUNTIME_PREVIEW_ORIGIN || null,
+        s3,
+        e2bApiKey: process.env.E2B_API_KEY || null,
+    };
+};
 
 export const parseConfig = (): LightdashConfig => {
     const lightdashSecret = process.env.LIGHTDASH_SECRET;
@@ -2036,6 +2238,11 @@ export const parseConfig = (): LightdashConfig => {
             enabled: preAggregatesEnabled,
             parquetEnabled:
                 process.env.PRE_AGGREGATES_PARQUET_ENABLED === 'true',
+            materializationMaxRows:
+                getIntegerFromEnvironmentVariable('PRE_AGGREGATES_MAX_ROWS') ??
+                null,
+            duckdbQueryMemoryLimit:
+                process.env.PRE_AGGREGATE_DUCKDB_QUERY_MEMORY_LIMIT ?? null,
             s3: preAggregatesS3,
         },
         userImpersonation: {
@@ -2044,5 +2251,11 @@ export const parseConfig = (): LightdashConfig => {
                     ? true
                     : undefined,
         },
+        changeChartExplore: {
+            enabled: process.env.CHANGE_CHART_EXPLORE_ENABLED
+                ? process.env.CHANGE_CHART_EXPLORE_ENABLED === 'true'
+                : undefined,
+        },
+        appRuntime: parseAppRuntimeConfig(siteUrl),
     };
 };

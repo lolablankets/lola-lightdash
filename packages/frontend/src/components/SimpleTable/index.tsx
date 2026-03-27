@@ -1,3 +1,4 @@
+import { FeatureFlags } from '@lightdash/common';
 import { Box, Button, Flex, Text } from '@mantine/core';
 import { noop } from '@mantine/utils';
 import { IconAlertCircle, IconRefresh, IconTable } from '@tabler/icons-react';
@@ -6,6 +7,8 @@ import {
     isChunkLoadError,
     triggerChunkErrorReload,
 } from '../../features/chunkErrorHandler';
+import { useServerFeatureFlag } from '../../hooks/useServerOrClientFeatureFlag';
+import { computeLimitedRowCount, sliceRows } from '../../utils/sliceRows';
 import LoadingChart from '../common/LoadingChart';
 import PivotTable from '../common/PivotTable';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
@@ -52,8 +55,23 @@ const SimpleTable: FC<SimpleTableProps> = ({
     } = useVisualizationContext();
 
     const hasSignaledScreenshotReady = useRef(false);
+    const { data: showHideRowsFlag } = useServerFeatureFlag(
+        FeatureFlags.ShowHideRows,
+    );
+    const isShowHideRowsEnabled = showHideRowsFlag?.enabled ?? false;
+
+    const rowLimit = isTableVisualizationConfig(visualizationConfig)
+        ? visualizationConfig.chartConfig.rowLimit
+        : undefined;
+
+    const needsAllRows =
+        isShowHideRowsEnabled &&
+        rowLimit != null &&
+        rowLimit.count > 0 &&
+        (rowLimit.direction === 'last' || rowLimit.mode === 'hide');
 
     const shouldPaginateResults = useMemo(() => {
+        if (needsAllRows) return false;
         return Boolean(
             !resultsData ||
             !isTableVisualizationConfig(visualizationConfig) ||
@@ -61,7 +79,7 @@ const SimpleTable: FC<SimpleTableProps> = ({
             (!visualizationConfig.chartConfig.showSubtotals &&
                 !visualizationConfig.chartConfig.pivotTableData?.data),
         );
-    }, [resultsData, visualizationConfig]);
+    }, [needsAllRows, resultsData, visualizationConfig]);
 
     const loadResultsStatus = useMemo(() => {
         if (!resultsData) {
@@ -190,6 +208,22 @@ const SimpleTable: FC<SimpleTableProps> = ({
             : [];
     }, [visualizationConfig]);
 
+    const slicedRows = useMemo(
+        () =>
+            sliceRows(resultsData?.rows || [], isShowHideRowsEnabled, rowLimit),
+        [resultsData?.rows, isShowHideRowsEnabled, rowLimit],
+    );
+
+    const totalRowsCount = useMemo(
+        () =>
+            computeLimitedRowCount(
+                resultsData?.totalResults || 0,
+                isShowHideRowsEnabled,
+                rowLimit,
+            ),
+        [resultsData?.totalResults, isShowHideRowsEnabled, rowLimit],
+    );
+
     if (!isTableVisualizationConfig(visualizationConfig)) return null;
 
     const {
@@ -300,8 +334,8 @@ const SimpleTable: FC<SimpleTableProps> = ({
                 $shouldExpand={$shouldExpand}
                 className={className}
                 status={loadResultsStatus}
-                data={resultsData?.rows || []}
-                totalRowsCount={resultsData?.totalResults || 0}
+                data={slicedRows}
+                totalRowsCount={totalRowsCount}
                 isFetchingRows={!!resultsData?.isFetchingRows}
                 loadingState={() => <LoadingChart />}
                 emptyState={isDashboard ? DashboardEmptyState : undefined}
