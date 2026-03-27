@@ -52,21 +52,31 @@ type EnterpriseAppArguments = Pick<
 >;
 
 export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArguments> {
-    if (!lightdashConfig.license.licenseKey) {
+    const devBypass = process.env.LIGHTDASH_EE_ENABLED === 'true';
+
+    if (!devBypass && !lightdashConfig.license.licenseKey) {
         return {};
     }
 
-    const licenseClient = new LicenseClient({});
-
-    const license = await licenseClient.get(lightdashConfig.license.licenseKey);
-    if (license.isValid) {
-        Logger.info(
-            `Enterprise license for ${lightdashConfig.siteUrl} is valid.`,
+    if (devBypass) {
+        Logger.warn(
+            'LIGHTDASH_EE_ENABLED=true: skipping license validation. For development/testing only — not permitted in production.',
         );
     } else {
-        throw new ForbiddenError(
-            `Enterprise license for ${lightdashConfig.siteUrl} ${license.detail} [${license.code}]`,
+        const licenseClient = new LicenseClient({});
+
+        const license = await licenseClient.get(
+            lightdashConfig.license.licenseKey!,
         );
+        if (license.isValid) {
+            Logger.info(
+                `Enterprise license for ${lightdashConfig.siteUrl} is valid.`,
+            );
+        } else {
+            throw new ForbiddenError(
+                `Enterprise license for ${lightdashConfig.siteUrl} ${license.detail} [${license.code}]`,
+            );
+        }
     }
 
     // Register EE-specific NATS streams

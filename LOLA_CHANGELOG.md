@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 _Based on upstream `0.2675.0`_
 
+### Added
+
+- `LIGHTDASH_EE_ENABLED=true` env var bypasses the enterprise license check for
+  local development/testing. Permitted by the EE source-available license;
+  **not for production use.**
+  (`packages/backend/src/ee/index.ts`)
+
 ### Fixed
 
 - Completed date filter boundaries (`IN_THE_PAST`, `IN_THE_NEXT`) now respect
