@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-_Based on upstream `0.2627.0`_
+_Based on upstream `0.2675.0`_
 
 ### Fixed
 
@@ -25,4 +25,4 @@ _Based on upstream `0.2627.0`_
 
 - Local `.env` and `.env.development` files from git tracking. (`.gitignore`)
 
-[unreleased]: https://github.com/lolablankets/lola-lightdash/compare/0.2627.0...HEAD
+[unreleased]: https://github.com/lolablankets/lola-lightdash/compare/0.2675.0...HEAD
